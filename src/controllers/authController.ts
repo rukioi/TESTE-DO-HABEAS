@@ -5,6 +5,7 @@ import { authService } from '../services/authService';
 import { emailsService } from '../services/emailsService';
 import { prisma } from '../config/database';
 import { database } from '../config/database';
+import { getForgotPasswordEmailHtml } from '../templates/forgotPasswordEmail';
 import { Prisma } from '@prisma/client';
 import { createClient } from '@supabase/supabase-js';
 
@@ -197,14 +198,12 @@ export class AuthController {
         await database.setUserResetToken(user.email, token, expiresAt);
 
         const resetLink = `${baseUrl}/redefinir-senha?token=${token}`;
-        const html = `
-          <p>Olá, ${user.name || 'usuário'}.</p>
-          <p>Você solicitou a recuperação de senha no Habeas Desk.</p>
-          <p>Clique no link abaixo para definir uma nova senha (válido por 1 hora):</p>
-          <p><a href="${resetLink}" style="color:#2563eb;">Redefinir senha</a></p>
-          <p>Se você não solicitou isso, ignore este email.</p>
-          <p>— Equipe HabeasDesk</p>
-        `;
+        const fromEmail = process.env.MAIL_FROM_EMAIL || process.env.MAIL_USER || 'habeasdesk@optgrupo.com';
+        const html = getForgotPasswordEmailHtml({
+          userName: user.name || 'usuário',
+          resetLink,
+          fromEmail,
+        });
         await emailsService.sendEmail({
           to: user.email,
           subject: 'Recuperação de senha - Habeas Desk',
