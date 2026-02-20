@@ -62,6 +62,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal, Eye, Edit, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
+import { toast as sonnerToast } from "sonner";
 import { apiService } from "@/services/apiService";
 import { useAuth } from "@/hooks/useAuth";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -469,7 +470,7 @@ export function CRM() {
   const [ statusFilter, setStatusFilter ] = useState<string>("all");
   const [ advancedFilters, setAdvancedFilters ] = useState<any>(null);
   const [ pipelineViewMode, setPipelineViewMode ] = useState<"kanban" | "list" | "visualizacao">(
-    "list",
+    "kanban",
   );
   const [ editingStages, setEditingStages ] = useState(false);
   const [ tempStageNames, setTempStageNames ] = useState<{
@@ -735,8 +736,6 @@ export function CRM() {
   // Handle moving a deal to a different stage (drag and drop)
   const handleMoveDeal = async (dealId: string, newStage: DealStage) => {
     try {
-      console.log("Moving deal:", dealId, "to stage:", newStage);
-
       setDeals((prevDeals) =>
         prevDeals.map((deal) =>
           deal.id === dealId ? { ...deal, stage: newStage } : deal,
@@ -746,10 +745,7 @@ export function CRM() {
       // Rota dedicada para mover estágio (PATCH)
       await apiService.patch(`/deals/${dealId}/stage`, { stage: newStage });
 
-      toast({
-        title: "Negócio movido com sucesso",
-        description: `Negócio movido para "${newStage === "contacted" ? "Em Contato" : newStage === "proposal" ? "Com Proposta" : newStage === "won" ? "Cliente Bem Sucedido" : "Cliente Perdido"}"`,
-      });
+      sonnerToast.success("Status do Pipeline atualizado!");
     } catch (error) {
       console.error("Erro ao mover negócio:", error);
       await loadDeals({ stage: dealStageFilter, tags: dealTagsFilter });
@@ -1000,7 +996,25 @@ export function CRM() {
                     Pipeline de Vendas
                   </CardTitle>
                   <div className="flex items-center space-x-2">
-                    {/* Visualização única da pipeline */}
+                    {/* Toggle Kanban / Lista - igual à página de Tarefas */}
+                    <Button
+                      variant={pipelineViewMode === "kanban" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setPipelineViewMode("kanban")}
+                      title="Visualização por etapas (Kanban)"
+                    >
+                      <Grid3X3 className="h-4 w-4 mr-1" />
+                      Etapas
+                    </Button>
+                    <Button
+                      variant={pipelineViewMode === "list" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setPipelineViewMode("list")}
+                      title="Visualização em lista"
+                    >
+                      <List className="h-4 w-4 mr-1" />
+                      Lista
+                    </Button>
 
                     {/* Edit Stages Button */}
                     <Button

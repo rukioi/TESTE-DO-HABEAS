@@ -22,11 +22,28 @@ interface PipelineProps {
 }
 
 // PIPELINE SIMPLIFICADO: Apenas 4 estágios conforme solicitado
+// Estilo alinhado ao TaskBoard: indicadores visuais por etapa
 const stageConfig = {
-  contacted: { name: 'Em Contato', color: 'bg-blue-100 text-blue-800' },
-  proposal: { name: 'Com Proposta', color: 'bg-yellow-100 text-yellow-800' },
-  won: { name: 'Cliente Bem Sucedido', color: 'bg-green-100 text-green-800' },
-  lost: { name: 'Cliente Perdido', color: 'bg-red-100 text-red-800' },
+  contacted: {
+    name: 'Em Contato',
+    color: 'bg-blue-100 text-blue-800',
+    dotColor: 'bg-blue-500',
+  },
+  proposal: {
+    name: 'Com Proposta',
+    color: 'bg-yellow-100 text-yellow-800',
+    dotColor: 'bg-yellow-500',
+  },
+  won: {
+    name: 'Cliente Bem Sucedido',
+    color: 'bg-green-100 text-green-800',
+    dotColor: 'bg-green-500',
+  },
+  lost: {
+    name: 'Cliente Perdido',
+    color: 'bg-red-100 text-red-800',
+    dotColor: 'bg-red-500',
+  },
 };
 
 // REMOVIDOS: opportunity, advanced, general conforme solicitação
@@ -185,8 +202,12 @@ export function Pipeline({ stages, onAddDeal, onEditDeal, onDeleteDeal, onMoveDe
           }`}>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-medium">
-                  {stageConfig[stage.id]?.name || stage.name}
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <span
+                    className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${stageConfig[stage.id]?.dotColor || 'bg-gray-400'}`}
+                    aria-hidden
+                  />
+                  {stage.name}
                 </CardTitle>
                 <Button
                   size="sm"
@@ -198,7 +219,9 @@ export function Pipeline({ stages, onAddDeal, onEditDeal, onDeleteDeal, onMoveDe
                 </Button>
               </div>
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{stage.deals.length} negócios</span>
+                <span>
+                  {stage.deals.length} {stage.deals.length === 1 ? 'negócio' : 'negócios'}
+                </span>
                 <span>
                   {formatCurrency(getTotalValue(stage.deals), 'BRL')}
                 </span>
@@ -207,15 +230,16 @@ export function Pipeline({ stages, onAddDeal, onEditDeal, onDeleteDeal, onMoveDe
             <CardContent className="flex-1 space-y-3 p-3 pt-0">
               {/* IMPLEMENTAÇÃO: Cards paginados - 5 por página */}
               {getCurrentPageDeals(stage.deals, stage.id).map((deal) => {
-                const borderColor =
-                  deal.stage === 'contacted' ? 'border-t-blue-400' :
-                  deal.stage === 'proposal' ? 'border-t-yellow-400' :
-                  deal.stage === 'won' ? 'border-t-green-400' :
-                  'border-t-red-400';
+                const stageBorderColor =
+                  deal.stage === 'contacted' ? '#3b82f6' :
+                  deal.stage === 'proposal' ? '#eab308' :
+                  deal.stage === 'won' ? '#22c55e' :
+                  '#ef4444';
                 return (
                   <Card
                     key={deal.id}
-                    className={`cursor-move transition-all bg-white border rounded-xl shadow-sm hover:shadow-md ${borderColor} border-t-4 ${draggedDealId === deal.id ? 'opacity-50' : ''}`}
+                    className={`cursor-move transition-all bg-white border rounded-xl shadow-sm hover:shadow-md border-l-4 ${draggedDealId === deal.id ? 'opacity-50' : ''} ${pinnedDeals.has(deal.id) ? 'ring-2 ring-blue-200 bg-blue-50/50' : ''}`}
+                    style={{ borderLeftColor: stageBorderColor }}
                     draggable
                     onDragStart={(e) => handleDragStart(e, deal.id)}
                     onDragEnd={handleDragEnd}
@@ -230,8 +254,11 @@ export function Pipeline({ stages, onAddDeal, onEditDeal, onDeleteDeal, onMoveDe
                                 {deal.contactName.split(' ').map(n => n[0]).join('').toUpperCase()}
                               </AvatarFallback>
                             </Avatar>
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold truncate">
+                            <div className="min-w-0 flex-1">
+                              <div
+                                className="text-sm font-semibold truncate cursor-pointer hover:text-blue-600 line-clamp-2"
+                                onClick={() => onViewDeal?.(deal)}
+                              >
                                 {deal.title}
                               </div>
                               <div className="text-xs text-muted-foreground truncate">
@@ -318,7 +345,7 @@ export function Pipeline({ stages, onAddDeal, onEditDeal, onDeleteDeal, onMoveDe
                     onClick={() => onAddDeal(stage.id)}
                     className="mt-2"
                   >
-                    <Plus className="h-3 w-3 mr-1" />
+                    <Plus className="h-4 w-4 mr-1" />
                     Adicionar
                   </Button>
                 </div>
