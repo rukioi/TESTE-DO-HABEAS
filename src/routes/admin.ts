@@ -16,10 +16,12 @@ router.delete('/keys/:id', adminController.deleteRegistrationKey);
 
 // Tenant Management
 router.get('/tenants', adminController.getTenants);
+router.get('/tenants/:id/detail', adminController.getTenantDetail);
 router.post('/tenants', adminController.createTenant);
 router.put('/tenants/:id', adminController.updateTenant);
 router.delete('/tenants/:id', adminController.deleteTenant);
 router.patch('/tenants/:id/status', adminController.toggleTenantStatus);
+router.post('/tenants/:id/assign-plan', adminController.assignPlanToTenant);
 
 // Global Metrics
 router.get('/metrics', adminController.getGlobalMetrics);

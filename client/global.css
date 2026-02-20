@@ -247,3 +247,53 @@
     @apply bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200;
   }
 }
+
+/* ============================================
+   Painel Administrativo – tipografia legível
+   Aplica apenas às páginas em /admin
+   ============================================ */
+.admin-layout {
+  font-family: 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'kern' 1, 'liga' 1;
+}
+
+/* Fonte primária: títulos e destaques */
+.admin-layout h1,
+.admin-layout h2,
+.admin-layout h3,
+.admin-layout h4,
+.admin-layout h5,
+.admin-layout h6,
+.admin-layout [class*="font-semibold"],
+.admin-layout [class*="font-bold"] {
+  font-family: inherit;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+
+.admin-layout h1 { font-size: 1.5rem; line-height: 1.3; }
+.admin-layout h2 { font-size: 1.25rem; line-height: 1.35; }
+.admin-layout h3 { font-size: 1.125rem; line-height: 1.4; }
+
+/* Fonte secundária: corpo de texto e labels */
+.admin-layout p,
+.admin-layout span,
+.admin-layout label,
+.admin-layout td,
+.admin-layout th,
+.admin-layout input,
+.admin-layout select,
+.admin-layout button,
+.admin-layout [class*="text-sm"],
+.admin-layout [class*="text-xs"] {
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.admin-layout .text-muted-foreground,
+.admin-layout [class*="text-gray-400"],
+.admin-layout [class*="text-gray-500"] {
+  letter-spacing: 0.01em;
+}

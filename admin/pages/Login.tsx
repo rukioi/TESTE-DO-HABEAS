@@ -38,14 +38,6 @@ export function AdminLogin() {
     if (error) setError('');
   };
 
-  const handleAutoFill = () => {
-    setFormData({
-      email: 'admin@legalsaas.com',
-      password: 'admin123456'
-    });
-    setError('');
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -86,7 +78,7 @@ export function AdminLogin() {
                   <Input
                     id="email"
                     type="email"
-                    placeholder="admin@legalsaas.com"
+                    placeholder="seu@email.com"
                     className="pl-10 bg-slate-700/80 border-slate-600 text-white placeholder:text-slate-400 focus:border-blue-500 focus:ring-blue-500/20 h-11"
                     value={formData.email}
                     onChange={(e) => handleInputChange('email', e.target.value)}

@@ -4,7 +4,7 @@ interface AdminUser {
   id: string;
   email: string;
   name: string;
-  role: "admin" | "super_admin";
+  role: string;
 }
 
 interface AdminAuthContextType {
@@ -41,36 +41,16 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Handle mock token
-      if (token.startsWith("mock-admin-token")) {
-        const mockUser = {
-          id: "admin-1",
-          email: "admin@legalsaas.com",
-          name: "Administrator",
-          role: "admin" as const,
-        };
-        setUser(mockUser);
-        setIsLoading(false);
-        return;
-      }
+      const response = await fetch("/api/admin/auth/me", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-      // Try real API if available
-      try {
-        const response = await fetch("/api/admin/auth/me", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (response.ok) {
-          const userData = await response.json();
-          setUser(userData.user);
-        } else {
-          localStorage.removeItem("admin_access_token");
-          localStorage.removeItem("admin_refresh_token");
-          setUser(null);
-        }
-      } catch (error) {
+      if (response.ok) {
+        const userData = await response.json();
+        setUser(userData.user);
+      } else {
         localStorage.removeItem("admin_access_token");
         localStorage.removeItem("admin_refresh_token");
         setUser(null);
@@ -86,72 +66,40 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = async (email: string, password: string) => {
-    // Clear any existing tokens first
     localStorage.removeItem("admin_access_token");
     localStorage.removeItem("admin_refresh_token");
-    
-    // Mock authentication for development
-    if (email === "admin@legalsaas.com" && password === "admin123456") {
-      const mockUser = {
-        id: "admin-1",
-        email: "admin@legalsaas.com",
-        name: "Admin User",
-        role: "admin" as const,
-      };
 
-      const mockToken = "mock-admin-token-" + Date.now();
+    const response = await fetch("/api/admin/auth/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email, password }),
+    });
 
-      localStorage.setItem("admin_access_token", mockToken);
-      localStorage.setItem("admin_refresh_token", "mock-refresh-token");
-
-      setUser(mockUser);
-      return;
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Credenciais inválidas");
     }
 
-    // Try real API if available
-    try {
-      console.log('Attempting admin login via API:', email);
-      
-      const response = await fetch("/api/admin/auth/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      });
+    const data = await response.json();
 
-      console.log('Admin API response status:', response.status);
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Admin login API error:', errorData);
-        throw new Error("Invalid credentials");
-      }
+    localStorage.setItem("admin_access_token", data.tokens.accessToken);
+    localStorage.setItem("admin_refresh_token", data.tokens.refreshToken);
 
-      const data = await response.json();
-      console.log('Admin login successful:', data);
-
-      localStorage.setItem("admin_access_token", data.tokens.accessToken);
-      localStorage.setItem("admin_refresh_token", data.tokens.refreshToken);
-
-      setUser(data.user);
-    } catch (error) {
-      console.error('Admin login failed:', error);
-      throw new Error("Invalid credentials");
-    }
+    setUser(data.user);
   };
 
   const logout = async () => {
     try {
-      const token = localStorage.getItem("admin_access_token");
-      if (token) {
-        await fetch("/api/admin/auth/logout", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-      }
+      const refreshToken = localStorage.getItem("admin_refresh_token");
+      await fetch("/api/admin/auth/logout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ refreshToken: refreshToken || undefined }),
+      });
     } catch (error) {
       console.error("Logout error:", error);
     } finally {

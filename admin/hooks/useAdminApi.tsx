@@ -255,6 +255,22 @@ export function useAdminApi() {
     }
   };
 
+  const assignPlanToTenant = useCallback(async (tenantId: string, planId: string, months = 1) => {
+    return apiCall(`/tenants/${tenantId}/assign-plan`, {
+      method: 'POST',
+      body: JSON.stringify({ planId, months }),
+    });
+  }, []);
+
+  /** Detalhe do tenant: usuários (ordem Gerencial, Composta, Simples) e chaves de registro */
+  const getTenantDetail = async (tenantId: string): Promise<{
+    users: Array<{ id: string; name: string; email: string; accountType: string; createdAt: string }>;
+    registrationKeys: Array<{ id: string; accountType: string; status: string; createdAt: string }>;
+  }> => {
+    const data = await apiCall(`/tenants/${tenantId}/detail`);
+    return data;
+  };
+
   const getRegistrationKeys = useCallback(async () => {
     try {
       const response = await apiCall('/keys');
@@ -360,6 +376,7 @@ export function useAdminApi() {
     isLoading,
     getGlobalMetrics,
     getTenants,
+    getTenantDetail,
     createTenant,
     deleteTenant,
     updateTenant,
@@ -372,6 +389,7 @@ export function useAdminApi() {
     createPlan,
     updatePlan,
     deletePlan,
+    assignPlanToTenant,
     // Evolution API
     evolutionCreateInstance: (data: { instanceName: string; integration?: string; number?: string; token: string }) =>
       apiCall('/evolution/instance/create', { method: 'POST', body: JSON.stringify(data) }),

@@ -3,7 +3,6 @@ import { AdminLayout } from '../components/AdminLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Users,
   Building,
@@ -13,16 +12,87 @@ import {
   AlertTriangle,
   CheckCircle,
   Clock,
-  DollarSign,
-  RefreshCw, // Import RefreshCw for the refresh button
+  RefreshCw,
+  Database,
+  Zap,
+  BarChart3,
 } from 'lucide-react';
 import { useAdminApi, GlobalMetrics } from '../hooks/useAdminApi';
-import { cn } from '@/lib/utils'; // Assuming cn is available for utility classes
+import { cn } from '@/lib/utils';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from 'recharts';
+
+// Paleta de cores do tema
+const COLORS = {
+  black: {
+    primary: '#000000',
+    secondary: '#1B223C',
+  },
+  orange: {
+    primary: '#e19a00',
+    hover: '#c78b00',
+  },
+  orangeAlt: {
+    primary: '#F5A100',
+    secondary: '#FFB733',
+  },
+  blue: {
+    secondary: '#3B82F6',
+  },
+  cyan: {
+    accent: '#06B6D4',
+  },
+  neutral: {
+    dark: '#2A2F45',
+    medium: '#6B7280',
+    light: '#E5E7EB',
+  },
+};
+
+// Cores para gráficos
+const CHART_COLORS = [
+  COLORS.orange.primary,
+  COLORS.blue.secondary,
+  COLORS.cyan.accent,
+  COLORS.orangeAlt.primary,
+  COLORS.orangeAlt.secondary,
+  '#8B5CF6', // Roxo para variedade
+  '#10B981', // Verde para variedade
+  '#EF4444', // Vermelho para variedade
+];
+
+// Custom Tooltip para gráficos
+const CustomTooltip = ({ active, payload }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-white dark:bg-gray-800 p-3 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg">
+        <p className="text-sm font-semibold text-gray-900 dark:text-white">
+          {payload[0].name}
+        </p>
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          {payload[0].value} {payload[0].payload.label || ''}
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
 
 export function AdminDashboard() {
   const { getGlobalMetrics, isLoading } = useAdminApi();
-  const [ metrics, setMetrics ] = useState<GlobalMetrics | null>(null);
-  const [ error, setError ] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState<GlobalMetrics | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadMetrics();
@@ -34,14 +104,13 @@ export function AdminDashboard() {
       const data = await getGlobalMetrics();
       setMetrics(data);
     } catch (err) {
-      console.error('Failed to load metrics:', err);
-      // Check if the error is an object with a 'message' property or a string
+      console.error('Erro ao carregar métricas:', err);
       if (err && typeof err === 'object' && 'message' in err) {
         setError(err.message as string);
       } else if (typeof err === 'string') {
         setError(err);
       } else {
-        setError('Failed to load dashboard data');
+        setError('Falha ao carregar dados do dashboard');
       }
     }
   };
@@ -75,25 +144,51 @@ export function AdminDashboard() {
     }
   };
 
+  // Preparar dados para gráfico de Registration Keys
+  const registrationKeysChartData = metrics?.registrationKeys?.map((key) => ({
+    name: key.accountType,
+    value: key.count,
+    fill: CHART_COLORS[metrics.registrationKeys.indexOf(key) % CHART_COLORS.length],
+  })) || [];
+
+  // Preparar dados para gráfico de Top Endpoints
+  const topEndpointsChartData =
+    metrics?.apiUsage?.endpoints
+      ?.sort((a, b) => b.count - a.count)
+      .slice(0, 8)
+      .map((ep, index) => ({
+        name: ep.name,
+        acessos: ep.count,
+        fill: CHART_COLORS[index % CHART_COLORS.length],
+      })) || [];
+
   if (isLoading && !metrics) {
     return (
       <AdminLayout>
-        <div className="space-y-6 p-6">
-          <div className="flex items-center justify-between">
+        <div className="space-y-6 p-4 md:p-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Dashboard</h1>
-              <p className="text-slate-600 dark:text-slate-400 mt-1">System overview and global metrics</p>
+              <h1 className="text-2xl md:text-3xl font-bold text-white">Dashboard</h1>
+              <p className="text-gray-400 mt-1 text-sm md:text-base">
+                Visão geral do sistema e métricas globais
+              </p>
             </div>
-            <Button onClick={loadMetrics} disabled={isLoading} variant="outline" className="shadow-sm">
+            <Button
+              onClick={loadMetrics}
+              disabled={isLoading}
+              className="bg-[#e19a00] hover:bg-[#c78b00] text-white border-0"
+            >
               <RefreshCw className={cn('h-4 w-4 mr-2', isLoading && 'animate-spin')} />
-              Refresh
+              Atualizar
             </Button>
           </div>
           <div className="animate-pulse">
-            <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-4"></div>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              {[ 1, 2, 3, 4 ].map((i) => (
-                <div key={i} className="h-32 bg-gray-200 dark:bg-gray-700 rounded"></div>
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div
+                  key={i}
+                  className="h-32 bg-gray-800 rounded-lg border border-gray-700"
+                ></div>
               ))}
             </div>
           </div>
@@ -102,16 +197,15 @@ export function AdminDashboard() {
     );
   }
 
-  // Updated error handling block
   if (error) {
     return (
       <AdminLayout>
-        <div className="p-6">
-          <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg shadow-sm">
+        <div className="p-4 md:p-6">
+          <div className="bg-red-950/20 border border-red-800 text-red-400 px-4 py-3 rounded-lg shadow-sm">
             <div className="flex items-center">
               <AlertTriangle className="h-5 w-5 mr-2" />
               <div>
-                <strong className="font-bold">Error: </strong>
+                <strong className="font-bold">Erro: </strong>
                 <span className="block sm:inline">{error}</span>
               </div>
             </div>
@@ -121,194 +215,314 @@ export function AdminDashboard() {
     );
   }
 
-
   return (
     <AdminLayout>
-      <div className="p-6 space-y-6">
+      <div className="p-4 md:p-6 space-y-6 bg-[#1B223C] min-h-screen">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Dashboard</h1>
-            <p className="text-slate-600 dark:text-slate-400 mt-1">System overview and global metrics</p>
+            <h1 className="text-2xl md:text-3xl font-bold text-white">Dashboard</h1>
+            <p className="text-gray-400 mt-1 text-sm md:text-base">
+              Visão geral do sistema e métricas globais
+            </p>
           </div>
-          <Button onClick={loadMetrics} disabled={isLoading} variant="outline" className="shadow-sm">
+          <Button
+            onClick={loadMetrics}
+            disabled={isLoading}
+            className="bg-[#e19a00] hover:bg-[#c78b00] text-white border-0 transition-colors"
+          >
             <RefreshCw className={cn('h-4 w-4 mr-2', isLoading && 'animate-spin')} />
-            Refresh
+            Atualizar
           </Button>
         </div>
 
-        {/* Error Alert - This block is now handled by the earlier return statement */}
-        {/* {error && (
-          <Alert className="border-red-500/50 bg-red-50 dark:bg-red-950/30">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription className="text-red-700 dark:text-red-400">
-              {error}
-            </AlertDescription>
-          </Alert>
-        )} */}
-
-        {/* Metrics Cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card className="shadow-sm">
+        {/* Métricas Principais - Cards */}
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          {/* Total Users */}
+          <Card className="bg-[#2A2F45] border-gray-700 shadow-lg hover:shadow-xl transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-900 dark:text-gray-100">Active Tenants</CardTitle>
-              <Building className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium text-gray-300">
+                Total de Usuários
+              </CardTitle>
+              <div className="p-2 bg-[#3B82F6]/20 rounded-lg">
+                <Users className="h-4 w-4 text-[#3B82F6]" />
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{metrics?.tenants.active || 0}</div>
-              <p className="text-xs text-muted-foreground">
+              <div className="text-2xl font-bold text-white">
+                {metrics?.users.total || 0}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">Em todos os tenants</p>
+            </CardContent>
+          </Card>
+
+          {/* Active Tenants */}
+          <Card className="bg-[#2A2F45] border-gray-700 shadow-lg hover:shadow-xl transition-shadow">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-gray-300">
+                Tenants Ativos
+              </CardTitle>
+              <div className="p-2 bg-[#e19a00]/20 rounded-lg">
+                <Building className="h-4 w-4 text-[#e19a00]" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-white">
+                {metrics?.tenants.active || 0}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
                 {metrics?.tenants.total || 0} total
               </p>
             </CardContent>
           </Card>
 
-          <Card className="shadow-sm">
+          {/* Registration Keys */}
+          <Card className="bg-[#2A2F45] border-gray-700 shadow-lg hover:shadow-xl transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-900 dark:text-gray-100">Total Users</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium text-gray-300">
+                Chaves de Registro
+              </CardTitle>
+              <div className="p-2 bg-[#F5A100]/20 rounded-lg">
+                <Key className="h-4 w-4 text-[#F5A100]" />
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{metrics?.users.total || 0}</div>
-              <p className="text-xs text-muted-foreground">
-                Across all tenants
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-900 dark:text-gray-100">Registration Keys</CardTitle>
-              <Key className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">
+              <div className="text-2xl font-bold text-white">
                 {metrics?.registrationKeys.reduce((sum, key) => sum + key.count, 0) || 0}
               </div>
-              <p className="text-xs text-muted-foreground">
-                Active keys
+              <p className="text-xs text-gray-400 mt-1">Chaves ativas</p>
+            </CardContent>
+          </Card>
+
+          {/* Judit Queries */}
+          <Card className="bg-[#2A2F45] border-gray-700 shadow-lg hover:shadow-xl transition-shadow">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-gray-300">
+                Consultas Judit (7d)
+              </CardTitle>
+              <div className="p-2 bg-[#06B6D4]/20 rounded-lg">
+                <Database className="h-4 w-4 text-[#06B6D4]" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-white">
+                {metrics?.apiUsage?.juditQueries || 0}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">Chamadas à API Judit</p>
+            </CardContent>
+          </Card>
+
+          {/* API Write Ops */}
+          <Card className="bg-[#2A2F45] border-gray-700 shadow-lg hover:shadow-xl transition-shadow">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-gray-300">
+                Operações de Escrita (7d)
+              </CardTitle>
+              <div className="p-2 bg-[#FFB733]/20 rounded-lg">
+                <Zap className="h-4 w-4 text-[#FFB733]" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-white">
+                {metrics?.apiUsage?.totalWriteOps || 0}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Create/Update/Delete em endpoints
               </p>
             </CardContent>
           </Card>
 
-          <Card className="shadow-sm">
+          {/* System Health */}
+          <Card className="bg-[#2A2F45] border-gray-700 shadow-lg hover:shadow-xl transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-900 dark:text-gray-100">System Health</CardTitle>
-              <TrendingUp className="h-4 w-4 text-green-500" />
+              <CardTitle className="text-sm font-medium text-gray-300">
+                Saúde do Sistema
+              </CardTitle>
+              <div className="p-2 bg-green-500/20 rounded-lg">
+                <CheckCircle className="h-4 w-4 text-green-500" />
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600 dark:text-green-400">Healthy</div>
-              <p className="text-xs text-muted-foreground">
-                All systems operational
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-900 dark:text-gray-100">Judit Queries (7d)</CardTitle>
-              <Activity className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{metrics?.apiUsage?.juditQueries || 0}</div>
-              <p className="text-xs text-muted-foreground">Calls to Judit API</p>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-900 dark:text-gray-100">API Write Ops (7d)</CardTitle>
-              <Activity className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{metrics?.apiUsage?.totalWriteOps || 0}</div>
-              <p className="text-xs text-muted-foreground">Create/Update/Delete across endpoints</p>
+              <div className="text-2xl font-bold text-green-400">Saudável</div>
+              <p className="text-xs text-gray-400 mt-1">Todos os sistemas operacionais</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Registration Keys Breakdown */}
-        {metrics?.registrationKeys && metrics.registrationKeys.length > 0 && (
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-gray-900 dark:text-gray-100">Registration Keys by Account Type</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-3">
-                {metrics.registrationKeys.map((keyType) => (
-                  <div key={keyType.accountType} className="flex items-center justify-between p-3 border rounded-lg shadow-sm bg-gray-50 dark:bg-gray-900/30 dark:border-gray-700">
-                    <div>
-                      <p className="font-medium text-gray-900 dark:text-gray-100">{keyType.accountType}</p>
-                      <p className="text-sm text-muted-foreground">Account Type</p>
-                    </div>
-                    <Badge variant="secondary" className="text-lg px-3 py-1">
-                      {keyType.count}
-                    </Badge>
+        {/* Gráficos e Seções */}
+        <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
+          {/* Registration Keys by Account Type - Gráfico de Pizza */}
+          {metrics?.registrationKeys && metrics.registrationKeys.length > 0 && (
+            <Card className="bg-[#2A2F45] border-gray-700 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5 text-[#e19a00]" />
+                  Chaves de Registro por Tipo de Conta
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-col md:flex-row items-center gap-6">
+                  <div className="w-full md:w-1/2">
+                    <ResponsiveContainer width="100%" height={250}>
+                      <PieChart>
+                        <Pie
+                          data={registrationKeysChartData}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) =>
+                            `${name}: ${(percent * 100).toFixed(0)}%`
+                          }
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {registrationKeysChartData.map((entry, index) => (
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={entry.fill || CHART_COLORS[index % CHART_COLORS.length]}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<CustomTooltip />} />
+                        <Legend
+                          wrapperStyle={{ color: '#E5E7EB' }}
+                          formatter={(value) => (
+                            <span style={{ color: '#E5E7EB' }}>{value}</span>
+                          )}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* API Usage Breakdown */}
-        {metrics?.apiUsage?.endpoints && metrics.apiUsage.endpoints.length > 0 && (
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-gray-900 dark:text-gray-100">Top Endpoints (7d)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-3 md:grid-cols-2">
-                {metrics.apiUsage.endpoints
-                  .sort((a, b) => b.count - a.count)
-                  .slice(0, 8)
-                  .map((ep) => (
-                    <div key={ep.name} className="flex items-center justify-between p-3 border rounded-lg shadow-sm bg-gray-50 dark:bg-gray-900/30 dark:border-gray-700">
-                      <div>
-                        <p className="font-medium text-gray-900 dark:text-gray-100">{ep.name}</p>
-                        <p className="text-sm text-muted-foreground">Endpoint</p>
+                  <div className="w-full md:w-1/2 space-y-3">
+                    {metrics.registrationKeys.map((keyType, index) => (
+                      <div
+                        key={keyType.accountType}
+                        className="flex items-center justify-between p-3 rounded-lg bg-gray-800/50 border border-gray-700"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-4 h-4 rounded-full"
+                            style={{
+                              backgroundColor:
+                                CHART_COLORS[index % CHART_COLORS.length],
+                            }}
+                          ></div>
+                          <div>
+                            <p className="font-medium text-white">{keyType.accountType}</p>
+                            <p className="text-xs text-gray-400">Tipo de Conta</p>
+                          </div>
+                        </div>
+                        <Badge
+                          className="text-lg px-3 py-1 bg-[#e19a00]/20 text-[#e19a00] border-[#e19a00]/30"
+                        >
+                          {keyType.count}
+                        </Badge>
                       </div>
-                      <Badge variant="secondary" className="text-lg px-3 py-1">
-                        {ep.count}
-                      </Badge>
-                    </div>
-                  ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-        {/* Recent Activity */}
-        <Card className="shadow-sm">
+          {/* Top Endpoints - Gráfico de Barras */}
+          {metrics?.apiUsage?.endpoints && metrics.apiUsage.endpoints.length > 0 && (
+            <Card className="bg-[#2A2F45] border-gray-700 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-[#3B82F6]" />
+                  Endpoints Mais Acessados (7d)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart
+                    data={topEndpointsChartData}
+                    margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                    <XAxis
+                      dataKey="name"
+                      angle={-45}
+                      textAnchor="end"
+                      height={100}
+                      tick={{ fill: '#9CA3AF', fontSize: 12 }}
+                    />
+                    <YAxis tick={{ fill: '#9CA3AF', fontSize: 12 }} />
+                    <Tooltip
+                      content={<CustomTooltip />}
+                      cursor={{ fill: 'rgba(59, 130, 246, 0.1)' }}
+                    />
+                    <Bar dataKey="acessos" radius={[8, 8, 0, 0]}>
+                      {topEndpointsChartData.map((entry, index) => (
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={entry.fill || CHART_COLORS[index % CHART_COLORS.length]}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Recent System Activity - Melhorado */}
+        <Card className="bg-[#2A2F45] border-gray-700 shadow-lg">
           <CardHeader>
-            <CardTitle className="text-gray-900 dark:text-gray-100">Recent System Activity</CardTitle>
+            <CardTitle className="text-white flex items-center gap-2">
+              <Activity className="h-5 w-5 text-[#06B6D4]" />
+              Atividade Recente do Sistema
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               {metrics?.recentActivity && metrics.recentActivity.length > 0 ? (
-                metrics.recentActivity.map((activity) => (
-                  <div
-                    key={activity.id}
-                    className={`p-3 border-l-4 rounded-lg ${getActivityColor(activity.level)} shadow-sm`}
-                  >
-                    <div className="flex items-start space-x-3">
-                      {getActivityIcon(activity.level)}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{activity.message}</p>
-                        <div className="flex items-center space-x-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                          {activity.tenantName && (
-                            <span className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">Tenant: {activity.tenantName}</span>
-                          )}
-                          <span className="hidden sm:inline">•</span>
-                          <span>{new Date(activity.createdAt).toLocaleString()}</span>
+                <div className="space-y-3">
+                  {metrics.recentActivity.map((activity) => (
+                    <div
+                      key={activity.id}
+                      className={`p-4 border-l-4 rounded-lg ${getActivityColor(
+                        activity.level
+                      )} shadow-sm hover:shadow-md transition-shadow bg-gray-800/50 border-gray-700`}
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className="mt-0.5">{getActivityIcon(activity.level)}</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-white mb-2">
+                            {activity.message}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                            {activity.tenantName && (
+                              <Badge
+                                variant="outline"
+                                className="bg-[#e19a00]/10 text-[#e19a00] border-[#e19a00]/30"
+                              >
+                                Tenant: {activity.tenantName}
+                              </Badge>
+                            )}
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {new Date(activity.createdAt).toLocaleString('pt-BR', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Activity className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>No recent activity</p>
+                <div className="text-center py-12 text-gray-400">
+                  <Activity className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p className="text-sm">Nenhuma atividade recente</p>
                 </div>
               )}
             </div>

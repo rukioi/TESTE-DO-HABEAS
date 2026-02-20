@@ -13,10 +13,10 @@ function AdminRoutes() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+      <div className="min-h-screen bg-[#1B223C] flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin h-8 w-8 border-4 border-blue-400 border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-slate-400">Loading admin panel...</p>
+          <div className="animate-spin h-10 w-10 border-4 border-[#e19a00] border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-gray-400">Carregando painel administrativo...</p>
         </div>
       </div>
     );
@@ -38,7 +38,7 @@ function AdminRoutes() {
 
 export function AdminApp() {
   return (
-    <div className="dark">
+    <div className="admin-layout dark">
       <AdminAuthProvider>
         <AdminRoutes />
       </AdminAuthProvider>

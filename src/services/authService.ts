@@ -71,6 +71,115 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
+  async generateAdminTokens(admin: any) {
+    const payload = {
+      userId: admin.id,
+      email: admin.email,
+      name: admin.name,
+      role: admin.role || 'superadmin',
+    };
+
+    const accessToken = jwt.sign(payload, this.accessTokenSecret, {
+      expiresIn: process.env.JWT_ACCESS_EXPIRES as StringValue || '24H',
+      issuer: 'legalsaas',
+      audience: 'legalsaas-users'
+    });
+
+    const refreshToken = jwt.sign(payload, this.refreshTokenSecret, {
+      expiresIn: process.env.JWT_REFRESH_EXPIRES as StringValue || '7D',
+      issuer: 'legalsaas',
+      audience: 'legalsaas-users'
+    });
+
+    const tokenHash = await bcrypt.hash(refreshToken, 10);
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    await database.createAdminRefreshToken({
+      tokenHash,
+      adminId: admin.id,
+      expiresAt: expiresAt.toISOString(),
+      isActive: true,
+    });
+
+    return { accessToken, refreshToken };
+  }
+
+  async verifyAdminRefreshToken(token: string): Promise<any> {
+    try {
+      const decoded = jwt.verify(token, this.refreshTokenSecret, {
+        issuer: 'legalsaas',
+        audience: 'legalsaas-users'
+      }) as { userId: string; email: string; role?: string };
+
+      if (!decoded.role) {
+        throw new Error('Invalid admin refresh token');
+      }
+
+      const adminId = decoded.userId;
+      const adminTokens = await database.getActiveAdminRefreshTokensForAdmin(adminId);
+
+      let isValidToken = false;
+      for (const storedToken of adminTokens) {
+        if (await bcrypt.compare(token, storedToken.tokenHash)) {
+          isValidToken = true;
+          break;
+        }
+      }
+
+      if (!isValidToken) {
+        throw new Error('Admin refresh token not found or expired');
+      }
+
+      return decoded;
+    } catch (error) {
+      throw new Error('Invalid or expired admin refresh token');
+    }
+  }
+
+  async refreshAdminTokens(refreshToken: string) {
+    const decoded = await this.verifyAdminRefreshToken(refreshToken);
+
+    const admin = await database.findAdminByEmail(decoded.email);
+    if (!admin || !admin.isActive) {
+      throw new Error('Admin account not found or inactive');
+    }
+
+    const adminId = decoded.userId;
+    const adminTokens = await database.getActiveAdminRefreshTokensForAdmin(adminId);
+
+    for (const storedToken of adminTokens) {
+      if (await bcrypt.compare(refreshToken, storedToken.tokenHash)) {
+        await database.revokeAdminRefreshTokenById(storedToken.id);
+        break;
+      }
+    }
+
+    const tokens = await this.generateAdminTokens(admin);
+
+    return {
+      user: {
+        id: admin.id,
+        email: admin.email,
+        name: admin.name,
+        role: admin.role,
+        lastLogin: admin.lastLogin,
+        createdAt: admin.createdAt,
+        updatedAt: admin.updatedAt,
+      },
+      tokens,
+    };
+  }
+
+  async revokeAllAdminTokens(adminId: string) {
+    try {
+      await database.revokeAllAdminTokens(adminId);
+    } catch (error) {
+      console.error('Error revoking admin tokens:', error);
+      throw error;
+    }
+  }
+
   async verifyAccessToken(token: string): Promise<any> {
     try {
       return jwt.verify(token, this.accessTokenSecret, {
@@ -153,8 +262,7 @@ export class AuthService {
   async revokeAllTokens(userId: string, isAdmin: boolean = false) {
     try {
       if (isAdmin) {
-        // Handle admin token revocation if needed
-        console.log('Revoking admin tokens for user:', userId);
+        await this.revokeAllAdminTokens(userId);
       } else {
         await database.revokeAllUserTokens(userId);
       }
@@ -238,7 +346,7 @@ export class AuthService {
     // Update last login
     await database.updateAdminLastLogin(admin.id);
 
-    const tokens = await this.generateTokens(admin);
+    const tokens = await this.generateAdminTokens(admin);
 
     // Remove password from response
     const { password: _, ...adminWithoutPassword } = admin;

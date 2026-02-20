@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import { addMonths } from 'date-fns';
 import { database } from '../config/database';
 import { Prisma } from '@prisma/client';
 import { RegistrationKey } from '@prisma/client';
@@ -419,6 +420,66 @@ export class AdminController {
     }
   }
 
+  /** GET /api/admin/tenants/:id/detail - Usuários e chaves do tenant (para accordion) */
+  async getTenantDetail(req: Request, res: Response) {
+    try {
+      const { id: tenantId } = req.params;
+      const { prisma } = await import('../config/database');
+
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+      if (!tenant) {
+        return res.status(404).json({ error: 'Tenant not found' });
+      }
+
+      const [users, keys] = await Promise.all([
+        prisma.user.findMany({
+          where: { tenantId },
+          select: { id: true, name: true, email: true, accountType: true, createdAt: true },
+          orderBy: { accountType: 'asc' },
+        }),
+        prisma.registrationKey.findMany({
+          where: { tenantId },
+          select: { id: true, accountType: true, revoked: true, usesLeft: true, expiresAt: true, createdAt: true },
+        }),
+      ]);
+
+      const accountTypeOrder = [ 'GERENCIAL', 'COMPOSTA', 'SIMPLES' ];
+      const sortedUsers = [ ...users ].sort(
+        (a, b) => accountTypeOrder.indexOf(a.accountType) - accountTypeOrder.indexOf(b.accountType)
+      );
+
+      const now = new Date();
+      const registrationKeys = keys.map((k) => {
+        let status: 'ACTIVE' | 'USED' | 'EXPIRED' | 'REVOKED' = 'ACTIVE';
+        if (k.revoked) status = 'REVOKED';
+        else if (k.usesLeft <= 0) status = 'USED';
+        else if (k.expiresAt && k.expiresAt < now) status = 'EXPIRED';
+        return {
+          id: k.id,
+          accountType: k.accountType,
+          status,
+          createdAt: k.createdAt,
+        };
+      });
+
+      res.json({
+        users: sortedUsers.map((u) => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          accountType: u.accountType,
+          createdAt: u.createdAt,
+        })),
+        registrationKeys,
+      });
+    } catch (error) {
+      console.error('Get tenant detail error:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to fetch tenant detail',
+      });
+    }
+  }
+
   async createTenant(req: Request, res: Response) {
     try {
       const validatedData = createTenantSchema.parse(req.body);
@@ -557,6 +618,79 @@ export class AdminController {
       console.error('Toggle tenant status error:', error);
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to toggle tenant status',
+      });
+    }
+  }
+
+  async assignPlanToTenant(req: Request, res: Response) {
+    try {
+      const { id: tenantId } = req.params;
+      const assignPlanSchema = z.object({
+        planId: z.string().uuid('planId inválido'),
+        months: z.coerce.number().int().min(1).max(24).optional().default(1),
+      });
+      const body = assignPlanSchema.parse(req.body);
+
+      const { prisma } = await import('../config/database');
+
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+      if (!tenant) {
+        return res.status(404).json({ error: 'Tenant não encontrado' });
+      }
+
+      const plan = await prisma.plan.findUnique({ where: { id: body.planId } });
+      if (!plan) {
+        return res.status(400).json({ error: 'Plano não encontrado' });
+      }
+
+      const now = new Date();
+      const currentPeriodEnd = addMonths(now, body.months);
+
+      await prisma.subscription.create({
+        data: {
+          tenantId,
+          planId: plan.id,
+          status: 'active',
+          stripeCustomerId: null,
+          stripeSubscriptionId: null,
+          stripePriceId: null,
+          currentPeriodStart: now,
+          currentPeriodEnd,
+          cancelAtPeriodEnd: false,
+          metadata: { source: 'manual_pix' },
+        },
+      });
+
+      const maxStorage =
+        typeof plan.maxStorageGB === 'number' && plan.maxStorageGB > 0
+          ? BigInt(plan.maxStorageGB) * BigInt(1024) * BigInt(1024) * BigInt(1024)
+          : tenant.maxStorage;
+
+      await prisma.tenant.update({
+        where: { id: tenantId },
+        data: {
+          planId: plan.id,
+          planType: plan.name,
+          planExpiresAt: currentPeriodEnd,
+          isActive: true,
+          maxUsers: plan.maxUsers,
+          maxStorage,
+        },
+      });
+
+      res.json({
+        message: 'Plano concedido com sucesso',
+        plan: { id: plan.id, name: plan.name },
+        currentPeriodEnd: currentPeriodEnd.toISOString(),
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Dados inválidos', details: error.flatten() });
+      }
+      console.error('assignPlanToTenant error:', error);
+      res.status(500).json({
+        error: 'Erro ao conceder plano',
+        message: error instanceof Error ? error.message : 'Erro desconhecido',
       });
     }
   }

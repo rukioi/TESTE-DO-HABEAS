@@ -48,19 +48,6 @@ export const authenticateAdminToken = async (
   }
 
   try {
-    // Handle mock tokens for development
-    if (token.startsWith('mock-admin-token')) {
-      console.log('Using mock admin token for development');
-      req.user = {
-        id: 'admin-1',
-        email: 'admin@legalsaas.com',
-        name: 'Administrator',
-        role: 'superadmin',
-      };
-      next();
-      return;
-    }
-
     const decoded = await authService.verifyAccessToken(token);
     console.log('Token decoded successfully:', { userId: decoded.userId, email: decoded.email, role: decoded.role });
 
@@ -298,9 +285,11 @@ export const requireActivePlan = async (
     const sub = await prisma.subscription.findFirst({
       where: { tenantId: req.tenantId },
       orderBy: { updatedAt: 'desc' },
-      select: { status: true, cancelAtPeriodEnd: true }
+      select: { status: true, cancelAtPeriodEnd: true, currentPeriodEnd: true }
     });
-    const active = sub ? (sub.status === 'active' || sub.status === 'trialing') : false;
+    const statusOk = sub ? (sub.status === 'active' || sub.status === 'trialing') : false;
+    const periodOk = !sub?.currentPeriodEnd || new Date(sub.currentPeriodEnd) > new Date();
+    const active = statusOk && periodOk;
     if (!active) {
       return res.status(403).json({
         error: 'Plano necessário',

@@ -11,11 +11,17 @@ import { useAdminApi } from '../hooks/useAdminApi';
 
 export function AdminPlans() {
   const { getPlans, createPlan, updatePlan, deletePlan } = useAdminApi() as any;
-  const [ plans, setPlans ] = useState<any[]>([]);
-  const [ error, setError ] = useState<string | null>(null);
-  const [ isLoading, setIsLoading ] = useState(true);
-
-  const [ newPlan, setNewPlan ] = useState<{ name: string; stripePriceId: string; maxQueries: number; maxUsers: number; price?: number; additionalQueryFee?: number }>({
+  const [plans, setPlans] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [newPlan, setNewPlan] = useState<{
+    name: string;
+    stripePriceId: string;
+    maxQueries: number;
+    maxUsers: number;
+    price?: number;
+    additionalQueryFee?: number;
+  }>({
     name: '',
     stripePriceId: '',
     maxQueries: 0,
@@ -35,7 +41,7 @@ export function AdminPlans() {
       const list = await getPlans();
       setPlans(list);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load plans');
+      setError(err instanceof Error ? err.message : 'Falha ao carregar planos');
     } finally {
       setIsLoading(false);
     }
@@ -43,7 +49,7 @@ export function AdminPlans() {
 
   const handleCreatePlan = async () => {
     if (!newPlan.name || !newPlan.stripePriceId) {
-      alert('Informe nome e stripePriceId');
+      alert('Informe nome e Stripe Price ID');
       return;
     }
     try {
@@ -59,7 +65,7 @@ export function AdminPlans() {
       setNewPlan({ name: '', stripePriceId: '', maxQueries: 0, maxUsers: 5, price: 0, additionalQueryFee: 0 });
       await loadPlans();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create plan');
+      setError(err instanceof Error ? err.message : 'Falha ao criar plano');
     }
   };
 
@@ -76,7 +82,7 @@ export function AdminPlans() {
       });
       await loadPlans();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update plan');
+      setError(err instanceof Error ? err.message : 'Falha ao atualizar plano');
     }
   };
 
@@ -87,153 +93,217 @@ export function AdminPlans() {
       await deletePlan(id);
       await loadPlans();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete plan');
+      setError(err instanceof Error ? err.message : 'Falha ao excluir plano');
     }
   };
 
   return (
     <AdminLayout>
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Planos</h1>
-            <p className="text-gray-600">Controle de nome, Stripe Price e requisições</p>
-          </div>
+      <div className="p-4 md:p-6 space-y-6 bg-[#1B223C] min-h-screen">
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-white">Planos</h1>
+          <p className="text-sm text-gray-400 mt-1">Controle de nome, Stripe Price e requisições</p>
         </div>
 
         {error && (
-          <Alert variant="destructive">
+          <Alert className="border-red-800 bg-red-950/20 text-red-400">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
-        <Card>
+        <Card className="bg-[#2A2F45] border-gray-700 shadow-lg">
           <CardHeader>
-            <CardTitle className="flex items-center">
-              <Plus className="h-5 w-5 mr-2" />
+            <CardTitle className="text-white flex items-center">
+              <Plus className="h-5 w-5 mr-2 text-[#e19a00]" />
               Criar novo plano
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-              <div>
-                <label className="text-sm text-muted-foreground">Nome</label>
-                <Input value={newPlan.name} onChange={(e) => setNewPlan({ ...newPlan, name: e.target.value })} />
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">Nome</label>
+                <Input
+                  value={newPlan.name}
+                  onChange={(e) => setNewPlan({ ...newPlan, name: e.target.value })}
+                  className="bg-[#1B223C] border-gray-700 text-white"
+                />
               </div>
-              <div>
-                <label className="text-sm text-muted-foreground">Stripe Price ID</label>
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">Stripe Price ID</label>
                 <div className="relative">
-                  <CreditCard className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input className="pl-8" value={newPlan.stripePriceId} onChange={(e) => setNewPlan({ ...newPlan, stripePriceId: e.target.value })} />
+                  <CreditCard className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                  <Input
+                    className="pl-8 bg-[#1B223C] border-gray-700 text-white"
+                    value={newPlan.stripePriceId}
+                    onChange={(e) => setNewPlan({ ...newPlan, stripePriceId: e.target.value })}
+                  />
                 </div>
               </div>
-              <div>
-                <label className="text-sm text-muted-foreground">Max Queries</label>
-                <Input type="number" min={0} value={newPlan.maxQueries} onChange={(e) => setNewPlan({ ...newPlan, maxQueries: parseInt(e.target.value || '0') })} />
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">Max Queries</label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={newPlan.maxQueries}
+                  onChange={(e) => setNewPlan({ ...newPlan, maxQueries: parseInt(e.target.value || '0') })}
+                  className="bg-[#1B223C] border-gray-700 text-white"
+                />
               </div>
-              <div>
-                <label className="text-sm text-muted-foreground">Max Users</label>
-                <Input type="number" min={1} value={newPlan.maxUsers} onChange={(e) => setNewPlan({ ...newPlan, maxUsers: parseInt(e.target.value || '1') })} />
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">Max Users</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={newPlan.maxUsers}
+                  onChange={(e) => setNewPlan({ ...newPlan, maxUsers: parseInt(e.target.value || '1') })}
+                  className="bg-[#1B223C] border-gray-700 text-white"
+                />
               </div>
-              <div>
-                <label className="text-sm text-muted-foreground">Preço (R$)</label>
-                <Input type="number" step="0.01" min={0} onChange={(e) => (setNewPlan as any)({ ...newPlan, price: parseFloat(e.target.value || '0') })} />
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">Preço (R$)</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={newPlan.price ?? ''}
+                  onChange={(e) => setNewPlan({ ...newPlan, price: parseFloat(e.target.value || '0') })}
+                  className="bg-[#1B223C] border-gray-700 text-white"
+                />
               </div>
-              <div>
-                <label className="text-sm text-muted-foreground">Taxa Excedente (R$)</label>
-                <Input type="number" step="0.01" min={0} onChange={(e) => (setNewPlan as any)({ ...newPlan, additionalQueryFee: parseFloat(e.target.value || '0') })} />
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">Taxa excedente (R$)</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={newPlan.additionalQueryFee ?? ''}
+                  onChange={(e) => setNewPlan({ ...newPlan, additionalQueryFee: parseFloat(e.target.value || '0') })}
+                  className="bg-[#1B223C] border-gray-700 text-white"
+                />
               </div>
             </div>
-            <Button onClick={handleCreatePlan}>
+            <Button onClick={handleCreatePlan} className="bg-[#e19a00] hover:bg-[#c78b00] text-white">
               <Plus className="h-4 w-4 mr-2" />
-              Criar Plano
+              Criar plano
             </Button>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="bg-[#2A2F45] border-gray-700 shadow-lg">
           <CardHeader>
-            <CardTitle>Planos existentes</CardTitle>
+            <CardTitle className="text-white">Planos existentes</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <div className="text-center py-8">
-                <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
-                <p className="mt-2 text-muted-foreground">Carregando planos...</p>
+              <div className="text-center py-12">
+                <div className="animate-spin h-10 w-10 border-4 border-[#e19a00] border-t-transparent rounded-full mx-auto" />
+                <p className="mt-3 text-gray-400">Carregando planos...</p>
               </div>
             ) : (
-              <div className="border rounded-lg">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Nome</TableHead>
-                      <TableHead>Stripe Price ID</TableHead>
-                      <TableHead>Max Queries</TableHead>
-                      <TableHead>Max Users</TableHead>
-                      <TableHead>Preço</TableHead>
-                      <TableHead>Taxa Excedente</TableHead>
-                      <TableHead>Atualizado</TableHead>
-                      <TableHead className="w-40">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {plans.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                          Nenhum plano cadastrado
-                        </TableCell>
+              <div className="rounded-lg border border-gray-700 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-gray-700 hover:bg-transparent">
+                        <TableHead className="text-gray-400">Nome</TableHead>
+                        <TableHead className="text-gray-400 hidden lg:table-cell">Stripe Price ID</TableHead>
+                        <TableHead className="text-gray-400">Max Queries</TableHead>
+                        <TableHead className="text-gray-400">Max Users</TableHead>
+                        <TableHead className="text-gray-400 hidden md:table-cell">Preço</TableHead>
+                        <TableHead className="text-gray-400 hidden md:table-cell">Taxa excedente</TableHead>
+                        <TableHead className="text-gray-400 hidden sm:table-cell">Atualizado</TableHead>
+                        <TableHead className="text-gray-400 w-40">Ações</TableHead>
                       </TableRow>
-                    ) : (
-                      plans.map((p) => (
-                        <TableRow key={p.id}>
-                          <TableCell>
-                            <Input value={p.name} onChange={(e) => setPlans(plans.map(pl => pl.id === p.id ? { ...pl, name: e.target.value } : pl))} />
-                          </TableCell>
-                          <TableCell>
-                            <Input value={p.stripePriceId} onChange={(e) => setPlans(plans.map(pl => pl.id === p.id ? { ...pl, stripePriceId: e.target.value } : pl))} />
-                          </TableCell>
-                          <TableCell>
-                            <Input type="number" min={0} value={p.maxQueries || 0} onChange={(e) => setPlans(plans.map(pl => pl.id === p.id ? { ...pl, maxQueries: parseInt(e.target.value || '0') } : pl))} />
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{p.maxUsers}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              step="0.01"
-                              min={0}
-                              value={typeof p.price === 'number' ? p.price : (p.price ? Number(p.price) : 0)}
-                              onChange={(e) => setPlans(plans.map(pl => pl.id === p.id ? { ...pl, price: parseFloat(e.target.value || '0') } : pl))}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              step="0.01"
-                              min={0}
-                              value={typeof p.additionalQueryFee === 'number' ? p.additionalQueryFee : (p.additionalQueryFee ? Number(p.additionalQueryFee) : 0)}
-                              onChange={(e) => setPlans(plans.map(pl => pl.id === p.id ? { ...pl, additionalQueryFee: parseFloat(e.target.value || '0') } : pl))}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-sm text-muted-foreground">{new Date(p.updatedAt || p.createdAt).toLocaleString()}</span>
-                          </TableCell>
-                          <TableCell className="flex gap-2">
-                            <Button variant="secondary" onClick={() => handleUpdatePlan(p)}>
-                              <Save className="h-4 w-4 mr-2" />
-                              Salvar
-                            </Button>
-                            <Button variant="destructive" onClick={() => handleDeletePlan(p.id)}>
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Excluir
-                            </Button>
+                    </TableHeader>
+                    <TableBody>
+                      {plans.length === 0 ? (
+                        <TableRow className="border-gray-700 hover:bg-transparent">
+                          <TableCell colSpan={8} className="text-center py-12 text-gray-500">
+                            Nenhum plano cadastrado
                           </TableCell>
                         </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+                      ) : (
+                        plans.map((p) => (
+                          <TableRow key={p.id} className="border-gray-700 hover:bg-gray-800/50">
+                            <TableCell>
+                              <Input
+                                value={p.name}
+                                onChange={(e) => setPlans(plans.map(pl => pl.id === p.id ? { ...pl, name: e.target.value } : pl))}
+                                className="bg-[#1B223C] border-gray-700 text-white h-9 text-sm"
+                              />
+                            </TableCell>
+                            <TableCell className="hidden lg:table-cell">
+                              <Input
+                                value={p.stripePriceId}
+                                onChange={(e) => setPlans(plans.map(pl => pl.id === p.id ? { ...pl, stripePriceId: e.target.value } : pl))}
+                                className="bg-[#1B223C] border-gray-700 text-white h-9 text-sm"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={p.maxQueries || 0}
+                                onChange={(e) => setPlans(plans.map(pl => pl.id === p.id ? { ...pl, maxQueries: parseInt(e.target.value || '0') } : pl))}
+                                className="bg-[#1B223C] border-gray-700 text-white h-9 text-sm w-20"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="bg-[#e19a00]/20 text-[#e19a00] border-[#e19a00]/40">
+                                {p.maxUsers}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell">
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min={0}
+                                value={typeof p.price === 'number' ? p.price : (p.price ? Number(p.price) : 0)}
+                                onChange={(e) => setPlans(plans.map(pl => pl.id === p.id ? { ...pl, price: parseFloat(e.target.value || '0') } : pl))}
+                                className="bg-[#1B223C] border-gray-700 text-white h-9 text-sm w-24"
+                              />
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell">
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min={0}
+                                value={typeof p.additionalQueryFee === 'number' ? p.additionalQueryFee : (p.additionalQueryFee ? Number(p.additionalQueryFee) : 0)}
+                                onChange={(e) => setPlans(plans.map(pl => pl.id === p.id ? { ...pl, additionalQueryFee: parseFloat(e.target.value || '0') } : pl))}
+                                className="bg-[#1B223C] border-gray-700 text-white h-9 text-sm w-24"
+                              />
+                            </TableCell>
+                            <TableCell className="hidden sm:table-cell text-sm text-gray-500">
+                              {new Date(p.updatedAt || p.createdAt).toLocaleString('pt-BR')}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleUpdatePlan(p)}
+                                  className="border-gray-600 text-gray-300 hover:bg-[#1B223C] h-8"
+                                >
+                                  <Save className="h-3 w-3 mr-1" />
+                                  Salvar
+                                </Button>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => handleDeletePlan(p.id)}
+                                  className="h-8"
+                                >
+                                  <Trash2 className="h-3 w-3 mr-1" />
+                                  Excluir
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
             )}
           </CardContent>

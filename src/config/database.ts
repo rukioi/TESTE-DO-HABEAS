@@ -1270,6 +1270,64 @@ export class Database {
     }
   }
 
+  // Admin refresh tokens operations
+  async createAdminRefreshToken(tokenData: { tokenHash: string; adminId: string; expiresAt: string; isActive: boolean }) {
+    try {
+      const token = await prisma.adminRefreshToken.create({
+        data: {
+          tokenHash: tokenData.tokenHash,
+          adminId: tokenData.adminId,
+          expiresAt: new Date(tokenData.expiresAt),
+          isActive: tokenData.isActive,
+        }
+      });
+      return token;
+    } catch (error) {
+      console.error('Error creating admin refresh token:', error);
+      throw error;
+    }
+  }
+
+  async getActiveAdminRefreshTokensForAdmin(adminId: string) {
+    try {
+      const tokens = await prisma.adminRefreshToken.findMany({
+        where: {
+          adminId,
+          isActive: true,
+          expiresAt: { gt: new Date() }
+        }
+      });
+      return tokens;
+    } catch (error) {
+      console.error('Error getting active admin refresh tokens:', error);
+      return [];
+    }
+  }
+
+  async revokeAdminRefreshTokenById(id: string) {
+    try {
+      await prisma.adminRefreshToken.update({
+        where: { id },
+        data: { isActive: false }
+      });
+    } catch (error) {
+      console.error('Error revoking admin refresh token by ID:', error);
+      throw error;
+    }
+  }
+
+  async revokeAllAdminTokens(adminId: string) {
+    try {
+      await prisma.adminRefreshToken.updateMany({
+        where: { adminId },
+        data: { isActive: false }
+      });
+    } catch (error) {
+      console.error('Error revoking all admin tokens:', error);
+      throw error;
+    }
+  }
+
   // Audit logs
   async createAuditLog(logData: any) {
     try {
