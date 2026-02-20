@@ -1,0 +1,564 @@
+/**
+ * TASKS SERVICE - Gestão de Tarefas
+ * ==================================
+ * 
+ * ✅ ISOLAMENTO TENANT: Usa TenantDatabase e helpers de isolamento
+ * ✅ SEM DADOS MOCK: Operações reais no PostgreSQL
+ */
+
+import { TenantDatabase } from '../config/database';
+import {
+  queryTenantSchema,
+  insertInTenantSchema,
+  updateInTenantSchema,
+  softDeleteInTenantSchema
+} from '../utils/tenantHelpers';
+
+export interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  project_id?: string;
+  project_title?: string;
+  client_id?: string;
+  client_name?: string;
+  assigned_to: string;
+  status: 'not_started' | 'in_progress' | 'completed' | 'on_hold' | 'cancelled';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  start_date?: string;
+  end_date?: string;
+  estimated_hours?: number;
+  actual_hours?: number;
+  progress: number;
+  tags: string[];
+  notes?: string;
+  subtasks: any[];
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  is_active: boolean;
+}
+
+export interface CreateTaskData {
+  title: string;
+  description?: string;
+  projectId?: string;
+  projectTitle?: string;
+  clientId?: string;
+  clientName?: string;
+  assignedTo: string;
+  status?: 'not_started' | 'in_progress' | 'completed' | 'on_hold' | 'cancelled';
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  startDate?: string;
+  endDate?: string;
+  estimatedHours?: number;
+  actualHours?: number;
+  progress?: number;
+  tags?: string[];
+  notes?: string;
+  subtasks?: any[];
+}
+
+export interface UpdateTaskData extends Partial<CreateTaskData> { }
+
+export interface TaskFilters {
+  page?: number;
+  limit?: number;
+  status?: string;
+  priority?: string;
+  search?: string;
+  assignedTo?: string;
+  projectId?: string;
+}
+
+class TasksService {
+  private tableName = 'tasks';
+  private ensuredSchemas = new Set<string>();
+
+  /**
+   * Cria as tabelas necessárias se não existirem
+   * IMPORTANTE: Tabela criada automaticamente no schema do tenant
+   */
+  private async ensureTables(tenantDB: TenantDatabase): Promise<void> {
+    const schemaName = await tenantDB.getSchemaName();
+    if (this.ensuredSchemas.has(schemaName)) return;
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS \${schema}.${this.tableName} (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title VARCHAR NOT NULL,
+        description TEXT,
+        project_id UUID,
+        project_title VARCHAR,
+        client_id UUID,
+        client_name VARCHAR,
+        assigned_to VARCHAR NOT NULL,
+        status VARCHAR DEFAULT 'not_started' CHECK (status IN ('not_started', 'in_progress', 'completed', 'on_hold', 'cancelled')),
+        priority VARCHAR DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+        start_date DATE,
+        end_date DATE,
+        estimated_hours DECIMAL(5,2),
+        actual_hours DECIMAL(5,2),
+        progress INTEGER DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+        tags JSONB DEFAULT '[]'::jsonb,
+        notes TEXT,
+        subtasks JSONB DEFAULT '[]'::jsonb,
+        created_by VARCHAR NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        is_active BOOLEAN DEFAULT TRUE
+      )
+    `;
+
+    await queryTenantSchema(tenantDB, createTableQuery);
+
+    const alterColumns = [
+      `ALTER TABLE \${schema}.${this.tableName} ADD COLUMN IF NOT EXISTS client_id UUID`,
+
+    ];
+
+    for (const alterQuery of alterColumns) {
+      await queryTenantSchema(tenantDB, alterQuery);
+    }
+
+    // Criar índices para performance otimizada
+    const indexes = [
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_assigned_to ON \${schema}.${this.tableName}(assigned_to)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_status ON \${schema}.${this.tableName}(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_priority ON \${schema}.${this.tableName}(priority)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_project_id ON \${schema}.${this.tableName}(project_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_client_id ON \${schema}.${this.tableName}(client_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_active ON \${schema}.${this.tableName}(is_active)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_created_by ON \${schema}.${this.tableName}(created_by)`
+    ];
+
+    for (const indexQuery of indexes) {
+      await queryTenantSchema(tenantDB, indexQuery);
+    }
+
+    // Garantir defaults ríticos em schemas legados (id, created_at, updated_at)
+    try {
+      const idInfo = await queryTenantSchema<{ data_type: string; column_default: string | null }>(
+        tenantDB,
+        `
+        SELECT data_type, column_default
+        FROM information_schema.columns
+        WHERE table_schema = '\${schema}'
+          AND table_name = '${this.tableName}'
+          AND column_name = 'id'
+        `
+      );
+      const idType = idInfo?.[ 0 ]?.data_type?.toLowerCase();
+      const idDefault = idInfo?.[ 0 ]?.column_default;
+
+      if (!idDefault) {
+        if (idType === 'uuid') {
+          await tenantDB.executeInTenantSchema(`
+            ALTER TABLE \${schema}.${this.tableName}
+            ALTER COLUMN id SET DEFAULT gen_random_uuid()
+          `);
+        } else {
+          // Para varchar/text, manter compatibilidade via cast
+          await tenantDB.executeInTenantSchema(`
+            ALTER TABLE \${schema}.${this.tableName}
+            ALTER COLUMN id SET DEFAULT (gen_random_uuid())::text
+          `);
+        }
+      }
+    } catch (e) {
+      console.log('[TasksService] Error ensuring id default:', e);
+    }
+
+    try {
+      const createdAtDefault = await queryTenantSchema<{ column_default: string | null }>(
+        tenantDB,
+        `
+        SELECT column_default
+        FROM information_schema.columns
+        WHERE table_schema = '\${schema}'
+          AND table_name = '${this.tableName}'
+          AND column_name = 'created_at'
+        `
+      );
+      if (!createdAtDefault?.[ 0 ]?.column_default) {
+        await tenantDB.executeInTenantSchema(`
+          ALTER TABLE \${schema}.${this.tableName}
+          ALTER COLUMN created_at SET DEFAULT NOW()
+        `);
+      }
+    } catch (e) {
+      console.log('[TasksService] Error ensuring created_at default:', e);
+    }
+
+    try {
+      const updatedAtDefault = await queryTenantSchema<{ column_default: string | null }>(
+        tenantDB,
+        `
+        SELECT column_default
+        FROM information_schema.columns
+        WHERE table_schema = '\${schema}'
+          AND table_name = '${this.tableName}'
+          AND column_name = 'updated_at'
+        `
+      );
+      if (!updatedAtDefault?.[ 0 ]?.column_default) {
+        await tenantDB.executeInTenantSchema(`
+          ALTER TABLE \${schema}.${this.tableName}
+          ALTER COLUMN updated_at SET DEFAULT NOW()
+        `);
+      }
+    } catch (e) {
+      console.log('[TasksService] Error ensuring updated_at default:', e);
+    }
+
+    this.ensuredSchemas.add(schemaName);
+  }
+
+  /**
+   * Busca tarefas com filtros e paginação
+   */
+  async getTasks(tenantDB: TenantDatabase, filters: TaskFilters = {}): Promise<{
+    tasks: Task[];
+    pagination: any;
+  }> {
+    await this.ensureTables(tenantDB);
+    
+    const page = filters.page || 1;
+    const limit = filters.limit || 50;
+    const offset = (page - 1) * limit;
+    
+    if (filters.assignedTo) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(filters.assignedTo)) {
+        const res = await queryTenantSchema<{ id: string }>(
+          tenantDB,
+          `SELECT id::text as id FROM public.users WHERE name = $1 LIMIT 1`,
+          [filters.assignedTo]
+        );
+        const resolved = res?.[0]?.id;
+        if (resolved) {
+          filters.assignedTo = resolved;
+        }
+      }
+    }
+
+    let whereConditions = [  ];
+    let queryParams: any[] = [];
+    let paramIndex = 1;
+
+    if (filters.status) {
+      whereConditions.push(`status = $${paramIndex}`);
+      queryParams.push(filters.status);
+      paramIndex++;
+    }
+
+    if (filters.priority) {
+      whereConditions.push(`priority = $${paramIndex}`);
+      queryParams.push(filters.priority);
+      paramIndex++;
+    }
+
+    if (filters.assignedTo) {
+      whereConditions.push(`assigned_to = $${paramIndex}`);
+      queryParams.push(filters.assignedTo);
+      paramIndex++;
+    }
+
+    if (filters.projectId) {
+      whereConditions.push(`project_id = $${paramIndex}`);
+      queryParams.push(filters.projectId);
+      paramIndex++;
+    }
+
+    if (filters.search) {
+      whereConditions.push(`(title ILIKE $${paramIndex} OR description ILIKE $${paramIndex})`);
+      queryParams.push(`%${filters.search}%`);
+      paramIndex++;
+    }
+
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+    const tasksQuery = `
+      SELECT 
+        t.id::text,
+        t.title,
+        COALESCE(t.description, '') as description,
+        COALESCE(t.project_id::text, NULL) as project_id,
+        COALESCE(t.project_title, '') as project_title,
+        COALESCE(t.client_id::text, NULL) as client_id,
+        COALESCE(t.client_name, '') as client_name,
+        COALESCE(u.name, t.assigned_to) as assigned_to,
+        t.status,
+        t.priority,
+        COALESCE(t.progress, 0) as progress,
+        COALESCE(t.start_date::text, NULL) as start_date,
+        COALESCE(t.end_date::text, NULL) as end_date,
+        COALESCE(t.estimated_hours::numeric, NULL) as estimated_hours,
+        COALESCE(t.actual_hours::numeric, NULL) as actual_hours,
+        COALESCE(t.tags::jsonb, '[]'::jsonb) as tags,
+        COALESCE(t.notes, '') as notes,
+        COALESCE(t.subtasks::jsonb, '[]'::jsonb) as subtasks,
+        t.created_by,
+        t.created_at::text,
+        t.updated_at::text,
+        t.is_active
+      FROM \${schema}.${this.tableName} t
+      LEFT JOIN public.users u ON u.id::text = t.assigned_to
+      ${whereClause}
+      ORDER BY t.created_at DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+
+    const countQuery = `SELECT COUNT(*) as total FROM \${schema}.${this.tableName} ${whereClause}`;
+
+    const [ tasks, countResult ] = await Promise.all([
+      queryTenantSchema<Task>(tenantDB, tasksQuery, [ ...queryParams, limit, offset ]),
+      queryTenantSchema<{ total: string }>(tenantDB, countQuery, queryParams)
+    ]);
+
+    const total = parseInt(countResult[ 0 ]?.total || '0');
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      tasks,
+      pagination: { page, limit, total, totalPages, hasNext: page < totalPages, hasPrev: page > 1 }
+    };
+  }
+
+  /**
+   * Busca tarefa por ID
+   */
+  async getTaskById(tenantDB: TenantDatabase, taskId: string): Promise<Task | null> {
+    await this.ensureTables(tenantDB);
+
+    const query = `
+      SELECT 
+        t.id::text,
+        t.title,
+        COALESCE(t.description, '') as description,
+        COALESCE(t.project_id::text, NULL) as project_id,
+        COALESCE(t.project_title, '') as project_title,
+        COALESCE(t.client_id::text, NULL) as client_id,
+        COALESCE(t.client_name, '') as client_name,
+        COALESCE(u.name, t.assigned_to) as assigned_to,
+        t.status,
+        t.priority,
+        COALESCE(t.progress, 0) as progress,
+        COALESCE(t.start_date::text, NULL) as start_date,
+        COALESCE(t.end_date::text, NULL) as end_date,
+        COALESCE(t.estimated_hours::numeric, NULL) as estimated_hours,
+        COALESCE(t.actual_hours::numeric, NULL) as actual_hours,
+        COALESCE(t.tags::jsonb, '[]'::jsonb) as tags,
+        COALESCE(t.notes, '') as notes,
+        COALESCE(t.subtasks::jsonb, '[]'::jsonb) as subtasks,
+        t.created_by,
+        t.created_at::text,
+        t.updated_at::text,
+        t.is_active
+      FROM \${schema}.${this.tableName} t
+      LEFT JOIN public.users u ON u.id::text = t.assigned_to
+      WHERE t.id::text = $1 AND t.is_active = TRUE
+    `;
+    const result = await queryTenantSchema<Task>(tenantDB, query, [ taskId ]);
+    return result[ 0 ] || null;
+  }
+
+  /**
+   * Cria nova tarefa
+   */
+  async createTask(tenantDB: TenantDatabase, taskData: CreateTaskData, createdBy: string): Promise<Task> {
+    await this.ensureTables(tenantDB);
+
+    // Validar campos obrigatórios
+    if (!taskData.title) throw new Error('Título é obrigatório');
+    if (!taskData.assignedTo) throw new Error('Responsável é obrigatório');
+
+    const data: Record<string, any> = {
+      title: taskData.title,
+      assigned_to: taskData.assignedTo,
+      status: taskData.status || 'not_started',
+      priority: taskData.priority || 'medium',
+      progress: taskData.progress || 0,
+      created_by: createdBy
+    };
+
+    // Adicionar campos opcionais apenas se fornecidos
+    if (taskData.description) data.description = taskData.description;
+
+    // ProjectId: tratar vazio/'none', validar UUID e existência
+    if (taskData.projectId && taskData.projectId !== 'none') {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (uuidRegex.test(taskData.projectId)) {
+        const exists = await queryTenantSchema<{ exists: boolean }>(
+          tenantDB,
+          `SELECT EXISTS(SELECT 1 FROM \${schema}.projects WHERE id::text = $1 AND is_active = TRUE) AS exists`,
+          [ taskData.projectId ]
+        );
+        if (exists?.[ 0 ]?.exists) {
+          data.project_id = taskData.projectId;
+        } else {
+          console.warn('[TasksService] Provided project_id does not exist:', taskData.projectId);
+        }
+      } else {
+        console.warn('[TasksService] Invalid project_id (not UUID):', taskData.projectId);
+      }
+    }
+    if (taskData.projectTitle) data.project_title = taskData.projectTitle;
+
+    // ClientId: tratar vazio/'none', validar UUID e existência
+    if (taskData.clientId !== undefined) {
+      const rawClientId = taskData.clientId?.trim?.() ?? taskData.clientId;
+      if (!rawClientId || rawClientId === 'none') {
+        // não associar cliente
+      } else {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(rawClientId)) {
+          const exists = await queryTenantSchema<{ exists: boolean }>(
+            tenantDB,
+            `SELECT EXISTS(SELECT 1 FROM \${schema}.clients WHERE id::text = $1 AND is_active = TRUE) AS exists`,
+            [ rawClientId ]
+          );
+          if (exists?.[ 0 ]?.exists) {
+            data.client_id = rawClientId;
+          } else {
+            console.warn('[TasksService] Provided client_id does not exist in clients table:', rawClientId, '- campo será omitido');
+          }
+        } else {
+          console.warn('[TasksService] Invalid client_id (not UUID):', rawClientId, '- campo será omitido');
+        }
+      }
+    }
+    if (taskData.clientName) data.client_name = taskData.clientName;
+    if (taskData.startDate) data.start_date = taskData.startDate;
+    if (taskData.endDate) data.end_date = taskData.endDate;
+    if (taskData.estimatedHours !== undefined) data.estimated_hours = taskData.estimatedHours;
+    if (taskData.actualHours !== undefined) data.actual_hours = taskData.actualHours;
+    if (taskData.notes) data.notes = taskData.notes;
+    if (taskData.tags && taskData.tags.length > 0) data.tags = taskData.tags;
+    if (taskData.subtasks && taskData.subtasks.length > 0) data.subtasks = taskData.subtasks;
+
+    console.log('[TasksService] Creating task with data:', data);
+    const result = await insertInTenantSchema<Task>(tenantDB, this.tableName, data);
+    console.log('[TasksService] Task created successfully:', result);
+    return result;
+  }
+
+  /**
+   * Atualiza tarefa existente
+   */
+  async updateTask(tenantDB: TenantDatabase, taskId: string, updateData: UpdateTaskData): Promise<Task | null> {
+    await this.ensureTables(tenantDB);
+
+    const data: Record<string, any> = {};
+
+    if (updateData.title !== undefined) data.title = updateData.title;
+    if (updateData.description !== undefined) data.description = updateData.description;
+
+    // ProjectId: sanitizar vazio/'none', validar UUID e existência; caso não exista, setar NULL
+    if (updateData.projectId !== undefined) {
+      const rawProjectId = updateData.projectId?.trim?.() ?? updateData.projectId;
+      if (!rawProjectId || rawProjectId === 'none') {
+        data.project_id = null;
+      } else {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(rawProjectId)) {
+          const exists = await queryTenantSchema<{ exists: boolean }>(
+            tenantDB,
+            `SELECT EXISTS(SELECT 1 FROM \${schema}.projects WHERE id::text = $1 AND is_active = TRUE) AS exists`,
+            [ rawProjectId ]
+          );
+          data.project_id = exists?.[ 0 ]?.exists ? rawProjectId : null;
+        } else {
+          data.project_id = null;
+        }
+      }
+    }
+    if (updateData.projectTitle !== undefined) data.project_title = updateData.projectTitle;
+
+    // ClientId: sanitizar vazio/'none', validar UUID e existência; caso não exista, setar NULL
+    if (updateData.clientId !== undefined) {
+      const rawClientId = updateData.clientId?.trim?.() ?? updateData.clientId;
+      if (!rawClientId || rawClientId === 'none') {
+        data.client_id = null;
+      } else {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(rawClientId)) {
+          const exists = await queryTenantSchema<{ exists: boolean }>(
+            tenantDB,
+            `SELECT EXISTS(SELECT 1 FROM \${schema}.clients WHERE id::text = $1 AND is_active = TRUE) AS exists`,
+            [ rawClientId ]
+          );
+          data.client_id = exists?.[ 0 ]?.exists ? rawClientId : null;
+        } else {
+          data.client_id = null;
+        }
+      }
+    }
+    if (updateData.clientName !== undefined) data.client_name = updateData.clientName;
+    if (updateData.assignedTo !== undefined) data.assigned_to = updateData.assignedTo;
+    if (updateData.status !== undefined) data.status = updateData.status;
+    if (updateData.priority !== undefined) data.priority = updateData.priority;
+    if (updateData.startDate !== undefined) data.start_date = updateData.startDate;
+    if (updateData.endDate !== undefined) data.end_date = updateData.endDate;
+    if (updateData.estimatedHours !== undefined) data.estimated_hours = updateData.estimatedHours;
+    if (updateData.actualHours !== undefined) data.actual_hours = updateData.actualHours;
+    if (updateData.progress !== undefined) data.progress = updateData.progress;
+    if (updateData.tags !== undefined) data.tags = updateData.tags;
+    if (updateData.notes !== undefined) data.notes = updateData.notes;
+    if (updateData.subtasks !== undefined) data.subtasks = updateData.subtasks; // Enviar como array, não como string
+
+    if (Object.keys(data).length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    return await updateInTenantSchema<Task>(tenantDB, this.tableName, taskId, data);
+  }
+
+  /**
+   * Remove tarefa (soft delete)
+   */
+  async deleteTask(tenantDB: TenantDatabase, taskId: string): Promise<boolean> {
+    await this.ensureTables(tenantDB);
+    const task = await softDeleteInTenantSchema<Task>(tenantDB, this.tableName, taskId);
+    return !!task;
+  }
+
+  /**
+   * Obtém estatísticas das tarefas
+   */
+  async getTaskStats(tenantDB: TenantDatabase): Promise<{
+    total: number;
+    completed: number;
+    inProgress: number;
+    notStarted: number;
+    onHold: number;
+    urgent: number;
+  }> {
+    await this.ensureTables(tenantDB);
+
+    const query = `
+      SELECT 
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status = 'completed') as completed,
+        COUNT(*) FILTER (WHERE status = 'in_progress') as in_progress,
+        COUNT(*) FILTER (WHERE status = 'not_started') as not_started,
+        COUNT(*) FILTER (WHERE status = 'on_hold') as on_hold,
+        COUNT(*) FILTER (WHERE priority = 'urgent') as urgent
+      FROM \${schema}.${this.tableName}
+      WHERE is_active = TRUE
+    `;
+
+    const result = await queryTenantSchema<any>(tenantDB, query);
+    const stats = result[ 0 ];
+
+    return {
+      total: parseInt(stats.total || '0'),
+      completed: parseInt(stats.completed || '0'),
+      inProgress: parseInt(stats.in_progress || '0'),
+      notStarted: parseInt(stats.not_started || '0'),
+      onHold: parseInt(stats.on_hold || '0'),
+      urgent: parseInt(stats.urgent || '0')
+    };
+  }
+}
+
+export const tasksService = new TasksService();

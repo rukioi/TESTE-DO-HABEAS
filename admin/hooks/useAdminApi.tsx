@@ -1,0 +1,393 @@
+import { useState, useCallback } from 'react';
+
+export interface GlobalMetrics {
+  tenants: {
+    total: number;
+    active: number;
+  };
+  users: {
+    total: number;
+  };
+  registrationKeys: Array<{
+    accountType: string;
+    count: number;
+  }>;
+  recentActivity: Array<{
+    id: string;
+    level: string;
+    message: string;
+    tenantName?: string;
+    createdAt: string;
+  }>;
+  apiUsage?: {
+    juditQueries: number;
+    totalWriteOps: number;
+    endpoints: Array<{ name: string; count: number }>;
+  };
+}
+
+export interface Tenant {
+  id: string;
+  name: string;
+  schemaName: string;
+  planType: string;
+  isActive: boolean;
+  maxUsers: number;
+  userCount: number;
+  createdAt: string;
+  stats: {
+    clients: number;
+    projects: number;
+    tasks: number;
+    transactions: number;
+    invoices: number;
+  };
+}
+
+export interface RegistrationKey {
+  id: string;
+  key?: string;
+  accountType: string;
+  isUsed: boolean;
+  isRevoked: boolean;
+  isActive: boolean;
+  isExpired: boolean;
+  usedBy?: string;
+  usedAt?: string;
+  userInfo?: {
+    id: string;
+    name: string;
+    email: string;
+    isActive: boolean;
+    usedAt: string;
+    accountType?: string;
+  };
+  tenantInfo?: {
+    id: string;
+    name: string;
+    isActive: boolean;
+  };
+  usesAllowed: number;
+  usesLeft: number;
+  expiresAt?: string;
+  createdAt: string;
+  revoked: boolean;
+  status: 'ACTIVE' | 'USED' | 'EXPIRED' | 'REVOKED';
+  metadata?: any;
+}
+
+async function apiCall(endpoint: string, options: RequestInit = {}) {
+  const token = localStorage.getItem('admin_access_token');
+
+  const response = await fetch(`/api/admin${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      ...options.headers,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    let errorMessage = 'Request failed';
+
+    try {
+      const errorData = JSON.parse(errorText);
+      errorMessage = errorData.error || errorData.message || errorMessage;
+    } catch {
+      errorMessage = errorText || errorMessage;
+    }
+
+    throw new Error(errorMessage);
+  }
+
+  return response.json();
+}
+
+export function useAdminApi() {
+  const [ isLoading, setIsLoading ] = useState(false);
+  type Plan = {
+    id: string;
+    name: string;
+    stripePriceId: string;
+    maxUsers: number;
+    maxQueries?: number | null;
+    price?: number | null;
+    maxStorageGB?: number | null;
+    additionalQueryFee?: number | null;
+  };
+
+  const getGlobalMetrics = async (): Promise<GlobalMetrics> => {
+    setIsLoading(true);
+    try {
+      const data = await apiCall('/metrics');
+      return data;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getPlans = async (): Promise<Plan[]> => {
+    setIsLoading(true);
+    try {
+      const data = await apiCall('/plans');
+      return data.plans || [];
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const createPlan = async (planData: {
+    name: string;
+    stripePriceId: string;
+    maxUsers?: number;
+    maxQueries?: number;
+    price?: number;
+    additionalQueryFee?: number;
+  }): Promise<Plan> => {
+    setIsLoading(true);
+    try {
+      const data = await apiCall('/plans', {
+        method: 'POST',
+        body: JSON.stringify(planData),
+      });
+      return data.plan;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updatePlan = async (planId: string, updateData: Partial<{
+    name: string;
+    stripePriceId: string;
+    maxUsers: number;
+    maxQueries: number;
+    price: number;
+    additionalQueryFee: number;
+  }>): Promise<Plan> => {
+    setIsLoading(true);
+    try {
+      const data = await apiCall(`/plans/${planId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updateData),
+      });
+      return data.plan;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const deletePlan = async (planId: string): Promise<void> => {
+    setIsLoading(true);
+    try {
+      await apiCall(`/plans/${planId}`, {
+        method: 'DELETE',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getTenants = async (): Promise<Tenant[]> => {
+    setIsLoading(true);
+    try {
+      const data = await apiCall('/tenants');
+      return data.tenants || [];
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const createTenant = async (tenantData: {
+    name: string;
+    planType: string;
+    maxUsers: number;
+    maxStorage: number;
+    planExpiresAt?: Date;
+  }): Promise<Tenant> => {
+    setIsLoading(true);
+    try {
+      const data = await apiCall('/tenants', {
+        method: 'POST',
+        body: JSON.stringify(tenantData),
+      });
+      return data.tenant;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const deleteTenant = async (tenantId: string): Promise<void> => {
+    setIsLoading(true);
+    try {
+      await apiCall(`/tenants/${tenantId}`, {
+        method: 'DELETE',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updateTenant = async (tenantId: string, updateData: any): Promise<Tenant> => {
+    setIsLoading(true);
+    try {
+      const data = await apiCall(`/tenants/${tenantId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updateData),
+      });
+      return data.tenant;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const toggleTenantStatus = async (tenantId: string, isActive: boolean): Promise<Tenant> => {
+    setIsLoading(true);
+    try {
+      const data = await apiCall(`/tenants/${tenantId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isActive }),
+      });
+      return data.tenant;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getRegistrationKeys = useCallback(async () => {
+    try {
+      const response = await apiCall('/keys');
+      console.log('Registration keys response:', response);
+
+      // A resposta do backend já é um array direto
+      if (Array.isArray(response)) {
+        return response;
+      } else if (response.keys && Array.isArray(response.keys)) {
+        return response.keys;
+      } else {
+        console.warn('Unexpected response format for registration keys:', response);
+        return [];
+      }
+    } catch (error) {
+      console.error('Error getting registration keys:', error);
+      throw error;
+    }
+  }, []);
+
+  const createRegistrationKey = async (keyData: {
+    accountType: string;
+    tenantId?: string;
+    usesAllowed?: number;
+    key?: string;
+    expiresAt?: Date;
+    singleUse?: boolean;
+  }): Promise<{ key: string }> => {
+    setIsLoading(true);
+
+    console.log('Creating registration key with data:', keyData);
+
+    const response = await fetch('/api/admin/keys', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getToken()}`,
+      },
+      body: JSON.stringify({
+        accountType: keyData.accountType,
+        tenantId: keyData.tenantId,
+        usesAllowed: keyData.usesAllowed || 1,
+        key: keyData.key || null,
+        singleUse: keyData.singleUse ?? true,
+        expiresAt: keyData.expiresAt?.toISOString(),
+      }),
+    });
+
+    console.log('Create key response status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Create key error response:', errorText);
+
+      try {
+        const error = JSON.parse(errorText);
+        throw new Error(error.message || error.error || 'Failed to create registration key');
+      } catch (parseError) {
+        throw new Error(`Server error: ${response.status} - ${errorText}`);
+      }
+    }
+
+    const result = await response.json();
+    console.log('Registration key created successfully:', result);
+
+    // Return the key from the correct location in the response
+    return {
+      key: result.key || result.data?.key || 'Key not found in response'
+    };
+  };
+
+
+  const revokeRegistrationKey = useCallback(async (keyId: string): Promise<void> => {
+    setIsLoading(true);
+    try {
+      await apiCall(`/keys/${keyId}/revoke`, {
+        method: 'PATCH',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const deleteRegistrationKey = useCallback(async (keyId: string): Promise<void> => {
+    setIsLoading(true);
+    try {
+      await apiCall(`/keys/${keyId}`, {
+        method: 'DELETE',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Helper function to get the token, assuming it's stored similarly to admin_access_token
+  // This should be defined or imported if it's not globally available
+  const getToken = (): string | null => {
+    return localStorage.getItem('admin_access_token');
+  };
+
+
+  return {
+    isLoading,
+    getGlobalMetrics,
+    getTenants,
+    createTenant,
+    deleteTenant,
+    updateTenant,
+    toggleTenantStatus,
+    getRegistrationKeys,
+    createRegistrationKey,
+    revokeRegistrationKey,
+    deleteRegistrationKey,
+    getPlans,
+    createPlan,
+    updatePlan,
+    deletePlan,
+    // Evolution API
+    evolutionCreateInstance: (data: { instanceName: string; integration?: string; number?: string; token: string }) =>
+      apiCall('/evolution/instance/create', { method: 'POST', body: JSON.stringify(data) }),
+    evolutionDeleteInstance: (data: { instanceName: string; token: string }) =>
+      apiCall('/evolution/instance/delete', { method: 'DELETE', body: JSON.stringify(data) }),
+    evolutionFetchInstances: (instanceName: string) =>
+      apiCall(`/evolution/instances?instanceName=${encodeURIComponent(instanceName)}`),
+    evolutionConnectInstance: (instanceName: string) =>
+      apiCall(`/evolution/instance/connect?instanceName=${encodeURIComponent(instanceName)}`),
+    evolutionConnectWebhook: (instanceName: string) =>
+      apiCall('/evolution/webhook/connect', { method: 'POST', body: JSON.stringify({ instanceName }) }),
+    evolutionSendMessage: (data: { instanceName: string; number: string; text: string }) =>
+      apiCall('/evolution/message/send', { method: 'POST', body: JSON.stringify(data) }),
+    evolutionSetSelectedInstance: (tenantId: string, instanceName: string) =>
+      apiCall('/evolution/selected', { method: 'POST', body: JSON.stringify({ tenantId, instanceName }) }),
+    evolutionGetSelectedInstance: (tenantId: string) =>
+      apiCall(`/evolution/selected?tenantId=${encodeURIComponent(tenantId)}`),
+  };
+}

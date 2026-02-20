@@ -1,0 +1,32 @@
+[build]
+  command = "npm run build"
+  publish = "dist/spa"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+  included_files = ["node_modules/@prisma/client/**", "node_modules/prisma/**"]
+
+[[redirects]]
+  from = "/api/stripe/webhook"
+  to = "/.netlify/functions/stripe-webhook"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/server"
+  status = 200
+
+  [[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+  [[scheduled]]
+  path = "/.netlify/functions/receivables-scheduler"
+  cron = "0 * * * *"
+
+  [[scheduled]]
+  path = "/.netlify/functions/receivables-reminder"
+  cron = "0 9 * * *"

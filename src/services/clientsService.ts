@@ -1,0 +1,507 @@
+/**
+ * CLIENTS SERVICE - Gestão de Clientes
+ * ===================================
+ * 
+ * Serviço responsável por operações de banco de dados relacionadas aos clientes.
+ * 
+ * ✅ ISOLAMENTO TENANT: Usa TenantDatabase e helpers para garantir isolamento por schema
+ * ✅ SEM DADOS MOCK: Todas as operações são feitas diretamente no PostgreSQL
+ * 
+ * @see src/utils/tenantHelpers.ts - Helpers de isolamento (queryTenantSchema, insertInTenantSchema, etc.)
+ * @see src/config/database.ts - TenantDatabase para executar queries no schema correto
+ */
+
+import { TenantDatabase } from '../config/database';
+import {
+  queryTenantSchema,
+  insertInTenantSchema,
+  updateInTenantSchema,
+  softDeleteInTenantSchema
+} from '../utils/tenantHelpers';
+
+// ============================================================================
+// INTERFACES
+// ============================================================================
+
+export interface Client {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  organization?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  country?: string;
+  budget?: number;
+  currency?: 'BRL' | 'USD' | 'EUR';
+  status: 'active' | 'inactive' | 'pending';
+  tags?: string[];
+  notes?: string;
+  // Campos legais específicos
+  cpf?: string;
+  rg?: string;
+  professionalTitle?: string;
+  maritalStatus?: string;
+  birthDate?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  isActive: boolean;
+}
+
+export interface CreateClientData {
+  name: string;
+  email: string;
+  mobile?: string;
+  phone?: string;
+  organization?: string;
+  country?: string;
+  state?: string;
+  city?: string;
+  address?: string;
+  zipCode?: string;
+  budget?: number;
+  currency?: 'BRL' | 'USD' | 'EUR';
+  level?: string;
+  status?: 'active' | 'inactive' | 'pending';
+  tags?: string[];
+  notes?: string;
+  description?: string;
+  cpf?: string;
+  rg?: string;
+  pis?: string;
+  cei?: string;
+  professionalTitle?: string;
+  maritalStatus?: string;
+  birthDate?: string;
+  inssStatus?: string;
+  amountPaid?: number;
+  referredBy?: string;
+  registeredBy?: string;
+}
+
+export interface UpdateClientData extends Partial<CreateClientData> { }
+
+export interface ClientFilters {
+  page?: number;
+  limit?: number;
+  status?: string;
+  search?: string;
+  tags?: string[];
+}
+
+// ============================================================================
+// SERVICE CLASS
+// ============================================================================
+
+export class ClientsService {
+  private tableName = 'clients';
+  private ensuredSchemas = new Set<string>();
+
+  /**
+   * Cria as tabelas necessárias se não existirem
+   * IMPORTANTE: Tabela criada automaticamente no schema do tenant via ${schema} placeholder
+   */
+  private async ensureTables(tenantDB: TenantDatabase): Promise<void> {
+    const schemaName = await tenantDB.getSchemaName();
+    if (this.ensuredSchemas.has(schemaName)) return;
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS ${schemaName}.${this.tableName} (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR NOT NULL,
+        organization VARCHAR,
+        email VARCHAR NOT NULL,
+        phone VARCHAR,
+        country VARCHAR DEFAULT 'BR',
+        state VARCHAR,
+        address TEXT,
+        city VARCHAR,
+        zip_code VARCHAR,
+        budget DECIMAL(15,2),
+        currency VARCHAR(3) DEFAULT 'BRL',
+        level VARCHAR,
+        tags JSONB DEFAULT '[]',
+        description TEXT,
+        notes TEXT,
+        cpf VARCHAR,
+        rg VARCHAR,
+        pis VARCHAR,
+        cei VARCHAR,
+        professional_title VARCHAR,
+        marital_status VARCHAR,
+        birth_date DATE,
+        inss_status VARCHAR,
+        amount_paid DECIMAL(15,2) DEFAULT 0,
+        referred_by VARCHAR,
+        registered_by VARCHAR,
+        status VARCHAR DEFAULT 'active',
+        created_by VARCHAR NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        is_active BOOLEAN DEFAULT TRUE
+      )
+    `;
+
+    await queryTenantSchema(tenantDB, createTableQuery);
+
+    const alterColumns = [
+      `ALTER TABLE ${schemaName}.${this.tableName} ADD COLUMN IF NOT EXISTS country VARCHAR DEFAULT 'BR'`,
+      `ALTER TABLE ${schemaName}.${this.tableName} ADD COLUMN IF NOT EXISTS state VARCHAR`,
+      `ALTER TABLE ${schemaName}.${this.tableName} ADD COLUMN IF NOT EXISTS city VARCHAR`,
+      `ALTER TABLE ${schemaName}.${this.tableName} ADD COLUMN IF NOT EXISTS zip_code VARCHAR`,
+      `ALTER TABLE ${schemaName}.${this.tableName} ADD COLUMN IF NOT EXISTS address TEXT`,
+      `ALTER TABLE ${schemaName}.${this.tableName} ALTER COLUMN amount_paid SET DEFAULT 0`
+    ];
+    for (const stmt of alterColumns) {
+      await queryTenantSchema(tenantDB, stmt);
+    }
+
+    // Criar índices para performance otimizada
+    const indexes = [
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_name ON ${schemaName}.${this.tableName}(name)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_email ON ${schemaName}.${this.tableName}(email)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_status ON ${schemaName}.${this.tableName}(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_cpf ON ${schemaName}.${this.tableName}(cpf)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_phone ON ${schemaName}.${this.tableName}(phone)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_active ON ${schemaName}.${this.tableName}(is_active)`,
+      `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_created_by ON ${schemaName}.${this.tableName}(created_by)`
+    ];
+
+    for (const indexQuery of indexes) {
+      await queryTenantSchema(tenantDB, indexQuery);
+    }
+    this.ensuredSchemas.add(schemaName);
+  }
+
+  /**
+   * Busca clientes com filtros e paginação
+   * 
+   * @param tenantDB - TenantDatabase injetado via req.tenantDB
+   * @param filters - Filtros de busca e paginação
+   */
+  async getClients(tenantDB: TenantDatabase, filters: ClientFilters = {}): Promise<{
+    clients: Client[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasNext: boolean;
+      hasPrev: boolean;
+    };
+  }> {
+    await this.ensureTables(tenantDB);
+
+    const page = filters.page || 1;
+    const limit = filters.limit || 50;
+    const offset = (page - 1) * limit;
+
+    let whereConditions = [ 'is_active = TRUE' ];
+    let queryParams: any[] = [];
+    let paramIndex = 1;
+
+    // Filtro por status
+    if (filters.status) {
+      whereConditions.push(`status = $${paramIndex}`);
+      queryParams.push(filters.status);
+      paramIndex++;
+    }
+
+    // Filtro por busca (nome ou email)
+    if (filters.search) {
+      whereConditions.push(`(name ILIKE $${paramIndex} OR email ILIKE $${paramIndex})`);
+      queryParams.push(`%${filters.search}%`);
+      paramIndex++;
+    }
+
+    // Filtro por tags (PostgreSQL JSONB array contains)
+    if (filters.tags && filters.tags.length > 0) {
+      whereConditions.push(`tags ?| $${paramIndex}`);
+      queryParams.push(filters.tags);
+      paramIndex++;
+    }
+
+    const whereClause = whereConditions.length > 0
+      ? `WHERE ${whereConditions.join(' AND ')}`
+      : '';
+
+    // ✅ ISOLAMENTO: Query executada no schema correto via ${schema} placeholder
+    const clientsQuery = `
+      SELECT 
+        id::text                      AS id,
+        name,
+        email,
+        phone,
+        organization,
+        COALESCE(CASE WHEN address IS NOT NULL AND address LIKE '{%' THEN address::jsonb->>'street' ELSE NULL END, address) AS address,
+        COALESCE(CASE WHEN address IS NOT NULL AND address LIKE '{%' THEN address::jsonb->>'city'   ELSE NULL END, city)    AS city,
+        COALESCE(CASE WHEN address IS NOT NULL AND address LIKE '{%' THEN address::jsonb->>'state'  ELSE NULL END, state)   AS state,
+        COALESCE(CASE WHEN address IS NOT NULL AND address LIKE '{%' THEN address::jsonb->>'zipCode' ELSE NULL END, zip_code) AS "zipCode",
+        COALESCE(CASE WHEN address IS NOT NULL AND address LIKE '{%' THEN address::jsonb->>'country' ELSE NULL END, country)  AS country,
+        budget,
+        currency,
+        level,
+        tags,
+        description,
+        notes,
+        cpf,
+        rg,
+        pis,
+        cei,
+        professional_title            AS "professionalTitle",
+        marital_status                AS "maritalStatus",
+        birth_date::text              AS "birthDate",
+        inss_status                   AS "inssStatus",
+        amount_paid::numeric          AS "amountPaid",
+        referred_by                   AS "referredBy",
+        registered_by                 AS "registeredBy",
+        status,
+        created_by                    AS "createdBy",
+        created_at::text              AS "createdAt",
+        updated_at::text              AS "updatedAt",
+        is_active                     AS "isActive"
+      FROM \${schema}.${this.tableName}
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM \${schema}.${this.tableName}
+      ${whereClause}
+    `;
+
+    // Executar queries em paralelo para otimização
+    const [ clients, countResult ] = await Promise.all([
+      queryTenantSchema<Client>(tenantDB, clientsQuery, [ ...queryParams, limit, offset ]),
+      queryTenantSchema<{ total: string }>(tenantDB, countQuery, queryParams)
+    ]);
+
+    const total = parseInt(countResult[ 0 ]?.total || '0');
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      clients,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    };
+  }
+
+  /**
+   * Busca um cliente por ID
+   * 
+   * @param tenantDB - TenantDatabase injetado via req.tenantDB
+   * @param clientId - ID do cliente
+   */
+  async getClientById(tenantDB: TenantDatabase, clientId: string): Promise<Client | null> {
+    await this.ensureTables(tenantDB);
+
+    // ✅ ISOLAMENTO: Query no schema correto
+    const query = `
+      SELECT 
+        id::text                      AS id,
+        name,
+        email,
+        phone,
+        organization,
+        COALESCE(CASE WHEN address IS NOT NULL AND address LIKE '{%' THEN address::jsonb->>'street' ELSE NULL END, address) AS address,
+        COALESCE(CASE WHEN address IS NOT NULL AND address LIKE '{%' THEN address::jsonb->>'city'   ELSE NULL END, city)    AS city,
+        COALESCE(CASE WHEN address IS NOT NULL AND address LIKE '{%' THEN address::jsonb->>'state'  ELSE NULL END, state)   AS state,
+        COALESCE(CASE WHEN address IS NOT NULL AND address LIKE '{%' THEN address::jsonb->>'zipCode' ELSE NULL END, zip_code) AS "zipCode",
+        COALESCE(CASE WHEN address IS NOT NULL AND address LIKE '{%' THEN address::jsonb->>'country' ELSE NULL END, country)  AS country,
+        budget,
+        currency,
+        level,
+        tags,
+        description,
+        notes,
+        cpf,
+        rg,
+        pis,
+        cei,
+        professional_title            AS "professionalTitle",
+        marital_status                AS "maritalStatus",
+        birth_date::text              AS "birthDate",
+        inss_status                   AS "inssStatus",
+        amount_paid::numeric          AS "amountPaid",
+        referred_by                   AS "referredBy",
+        registered_by                 AS "registeredBy",
+        status,
+        created_by                    AS "createdBy",
+        created_at::text              AS "createdAt",
+        updated_at::text              AS "updatedAt",
+        is_active                     AS "isActive"
+      FROM \${schema}.${this.tableName}
+      WHERE id::text = $1 AND is_active = TRUE
+    `;
+
+    const result = await queryTenantSchema<Client>(tenantDB, query, [ clientId ]);
+    return result[ 0 ] || null;
+  }
+
+  /**
+   * Cria um novo cliente
+   * 
+   * @param tenantDB - TenantDatabase injetado via req.tenantDB
+   * @param clientData - Dados do cliente
+   * @param createdBy - ID do usuário que criou
+   */
+  async createClient(tenantDB: TenantDatabase, clientData: CreateClientData, createdBy: string): Promise<Client> {
+    await this.ensureTables(tenantDB);
+
+    // ✅ ISOLAMENTO: Inserção no schema correto usando helper
+    // Nota: O ID será gerado automaticamente pelo PostgreSQL (gen_random_uuid())
+    const data = {
+      name: clientData.name,
+      email: clientData.email,
+      phone: clientData.mobile || clientData.phone || null,
+      organization: clientData.organization || null,
+      address: clientData.address || null,
+      country: clientData.country || 'BR',
+      state: clientData.state || null,
+      city: clientData.city || null,
+      zip_code: clientData.zipCode || null,
+      budget: clientData.budget || null,
+      currency: clientData.currency || 'BRL',
+      status: clientData.status || 'active',
+      tags: clientData.tags || [],
+      description: clientData.description || null,
+      notes: clientData.notes || null,
+      cpf: clientData.cpf || null,
+      rg: clientData.rg || null,
+      pis: clientData.pis || null,
+      cei: clientData.cei || null,
+      professional_title: clientData.professionalTitle || null,
+      marital_status: clientData.maritalStatus || null,
+      inss_status: clientData.inssStatus || null,
+      amount_paid: clientData.amountPaid || null,
+      referred_by: clientData.referredBy || null,
+      registered_by: clientData.registeredBy || null,
+      created_by: createdBy
+    };
+
+    // Adicionar birth_date apenas se existir (evita string vazia)
+    if (clientData.birthDate && clientData.birthDate.trim() !== '') {
+      // @ts-expect-error
+      data.birth_date = clientData.birthDate;
+    }
+
+    const client = await insertInTenantSchema<Client>(tenantDB, this.tableName, data);
+    return client;
+  }
+
+  /**
+   * Atualiza um cliente existente
+   * 
+   * @param tenantDB - TenantDatabase injetado via req.tenantDB
+   * @param clientId - ID do cliente
+   * @param updateData - Dados para atualizar
+   */
+  async updateClient(tenantDB: TenantDatabase, clientId: string, updateData: UpdateClientData): Promise<Client | null> {
+    await this.ensureTables(tenantDB);
+
+    // Preparar dados de atualização (mapear campos camelCase para snake_case)
+    const data: Record<string, any> = {};
+
+    if (updateData.name !== undefined) data.name = updateData.name;
+    if (updateData.email !== undefined) data.email = updateData.email;
+    if (updateData.phone !== undefined) data.phone = updateData.phone;
+    if (updateData.mobile !== undefined) data.phone = updateData.mobile;
+    if (updateData.organization !== undefined) data.organization = updateData.organization;
+    if (updateData.address !== undefined) data.address = updateData.address || null;
+    if (updateData.country !== undefined) data.country = updateData.country || null;
+    if (updateData.state !== undefined) data.state = updateData.state || null;
+    if (updateData.city !== undefined) data.city = updateData.city || null;
+    if (updateData.zipCode !== undefined) data.zip_code = updateData.zipCode || null;
+    if (updateData.budget !== undefined) data.budget = updateData.budget;
+    if (updateData.currency !== undefined) data.currency = updateData.currency;
+    if (updateData.status !== undefined) data.status = updateData.status;
+    if (updateData.tags !== undefined) data.tags = updateData.tags;
+    if (updateData.description !== undefined) data.description = updateData.description;
+    if (updateData.notes !== undefined) data.notes = updateData.notes;
+    if (updateData.cpf !== undefined) data.cpf = updateData.cpf;
+    if (updateData.rg !== undefined) data.rg = updateData.rg;
+    if (updateData.pis !== undefined) data.pis = updateData.pis;
+    if (updateData.cei !== undefined) data.cei = updateData.cei;
+    if (updateData.professionalTitle !== undefined) data.professional_title = updateData.professionalTitle;
+    if (updateData.maritalStatus !== undefined) data.marital_status = updateData.maritalStatus;
+    if (updateData.birthDate !== undefined) {
+      data.birth_date = (updateData.birthDate && updateData.birthDate.trim() !== '') ? updateData.birthDate : null;
+    }
+    if (updateData.inssStatus !== undefined) data.inss_status = updateData.inssStatus;
+    if (updateData.amountPaid !== undefined) data.amount_paid = updateData.amountPaid;
+    if (updateData.referredBy !== undefined) data.referred_by = updateData.referredBy;
+    if (updateData.registeredBy !== undefined) data.registered_by = updateData.registeredBy;
+
+    if (Object.keys(data).length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    // ✅ ISOLAMENTO: Atualização no schema correto usando helper
+    const client = await updateInTenantSchema<Client>(tenantDB, this.tableName, clientId, data);
+    return client;
+  }
+
+  /**
+   * Remove um cliente (soft delete)
+   * 
+   * @param tenantDB - TenantDatabase injetado via req.tenantDB
+   * @param clientId - ID do cliente
+   */
+  async deleteClient(tenantDB: TenantDatabase, clientId: string): Promise<boolean> {
+    await this.ensureTables(tenantDB);
+
+    // ✅ ISOLAMENTO: Soft delete no schema correto usando helper
+    const client = await softDeleteInTenantSchema<Client>(tenantDB, this.tableName, clientId);
+    return !!client;
+  }
+
+  /**
+   * Obtém estatísticas dos clientes
+   * 
+   * @param tenantDB - TenantDatabase injetado via req.tenantDB
+   */
+  async getClientsStats(tenantDB: TenantDatabase): Promise<{
+    total: number;
+    active: number;
+    inactive: number;
+    pending: number;
+    thisMonth: number;
+  }> {
+    await this.ensureTables(tenantDB);
+
+    // ✅ ISOLAMENTO: Query de estatísticas no schema correto
+    const query = `
+      SELECT 
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status = 'active') as active,
+        COUNT(*) FILTER (WHERE status = 'inactive') as inactive,
+        COUNT(*) FILTER (WHERE status = 'pending') as pending,
+        COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('month', NOW())) as this_month
+      FROM \${schema}.${this.tableName}
+      WHERE is_active = TRUE
+    `;
+
+    const result = await queryTenantSchema<any>(tenantDB, query);
+    const stats = result[ 0 ];
+
+    return {
+      total: parseInt(stats.total || '0'),
+      active: parseInt(stats.active || '0'),
+      inactive: parseInt(stats.inactive || '0'),
+      pending: parseInt(stats.pending || '0'),
+      thisMonth: parseInt(stats.this_month || '0')
+    };
+  }
+}
+
+export const clientsService = new ClientsService();

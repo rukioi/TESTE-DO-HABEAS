@@ -1,0 +1,369 @@
+/**
+ * TRANSACTIONS CONTROLLER - Gestão de Fluxo de Caixa
+ * ===================================================
+ * 
+ * ✅ ISOLAMENTO TENANT: Usa req.tenantDB para garantir isolamento por schema
+ * ✅ SEM DADOS MOCK: Operações reais no banco de dados do tenant
+ * ✅ CONTROLE DE ACESSO: Apenas contas COMPOSTA e GERENCIAL (não SIMPLES)
+ */
+
+import { Response } from 'express';
+import { z } from 'zod';
+import { TenantRequest } from '../types';
+import { transactionsService } from '../services/transactionsService';
+import { database } from '../config/database';
+
+// Validation schemas
+const createTransactionSchema = z.object({
+  type: z.enum([ 'income', 'expense' ]),
+  amount: z.number().min(0.01, 'Amount must be greater than zero'),
+  categoryId: z.string().min(1, 'Category is required'),
+  category: z.string().min(1, 'Category name is required'),
+  description: z.string().min(1, 'Description is required'),
+  date: z.string().min(1, 'Date is required'),
+  paymentMethod: z.enum([ 'pix', 'credit_card', 'debit_card', 'bank_transfer', 'boleto', 'cash', 'check' ]).optional(),
+  status: z.enum([ 'pending', 'confirmed', 'cancelled' ]).default('confirmed'),
+  projectId: z.string().optional(),
+  projectTitle: z.string().optional(),
+  clientId: z.string().optional(),
+  clientName: z.string().optional(),
+  tags: z.array(z.string()).default([]),
+  notes: z.string().optional(),
+  isRecurring: z.boolean().default(false),
+  recurringFrequency: z.enum([ 'monthly', 'quarterly', 'yearly' ]).optional(),
+});
+
+const updateTransactionSchema = createTransactionSchema.partial();
+
+export class TransactionsController {
+  async getTransactions(req: TenantRequest, res: Response) {
+    try {
+      if (!req.user || !req.tenantDB) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Only COMPOSTA and GERENCIAL can access financial data
+      if (req.user.accountType === 'SIMPLES') {
+        return res.status(403).json({
+          error: 'Access denied',
+          message: 'Financial data not available for this account type',
+        });
+      }
+
+      // Extract query parameters for filtering
+      const {
+        page,
+        limit,
+        type,
+        status,
+        categoryId,
+        search,
+        tags,
+        projectId,
+        clientId,
+        dateFrom,
+        dateTo,
+        paymentMethod,
+        isRecurring
+      } = req.query;
+
+      const filters = {
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+        type: type as 'income' | 'expense' | undefined,
+        status: status as string | undefined,
+        categoryId: categoryId as string | undefined,
+        search: search as string | undefined,
+        tags: tags ? (Array.isArray(tags) ? tags as string[] : [ tags as string ]) : undefined,
+        projectId: projectId as string | undefined,
+        clientId: clientId as string | undefined,
+        dateFrom: dateFrom as string | undefined,
+        dateTo: dateTo as string | undefined,
+        paymentMethod: paymentMethod as string | undefined,
+        isRecurring: isRecurring ? isRecurring === 'true' : undefined
+      };
+
+      const result = await transactionsService.getTransactions(req.tenantDB, filters);
+
+      res.json(result);
+    } catch (error) {
+      console.error('Get transactions error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch transactions',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  async getTransaction(req: TenantRequest, res: Response) {
+    try {
+      if (!req.user || !req.tenantDB) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      if (req.user.accountType === 'SIMPLES') {
+        return res.status(403).json({
+          error: 'Access denied',
+          message: 'Financial data not available for this account type',
+        });
+      }
+
+      const { id } = req.params;
+      const transaction = await transactionsService.getTransactionById(req.tenantDB, id);
+
+      if (!transaction) {
+        return res.status(404).json({
+          error: 'Transaction not found',
+          message: 'The requested transaction does not exist or has been deleted'
+        });
+      }
+
+      res.json({ transaction });
+    } catch (error) {
+      console.error('Get transaction error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch transaction',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  async createTransaction(req: TenantRequest, res: Response) {
+    try {
+      console.log('=== CREATE TRANSACTION DEBUG ===');
+      console.log('Request user:', req.user ? { id: req.user.id, accountType: req.user.accountType } : 'undefined');
+      console.log('Request tenantDB:', req.tenantDB ? 'present' : 'undefined');
+      console.log('Request body:', req.body);
+
+      if (!req.user || !req.tenantDB) {
+        console.log('❌ Authentication/TenantDB missing');
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      if (req.user.accountType === 'SIMPLES') {
+        console.log('❌ SIMPLES account access denied');
+        return res.status(403).json({
+          error: 'Access denied',
+          message: 'Financial operations not available for this account type',
+        });
+      }
+
+      console.log('✅ Validating transaction data...');
+      const validatedData = createTransactionSchema.parse(req.body);
+      console.log('✅ Data validated successfully');
+
+      console.log('✅ Creating transaction via service...');
+      // @ts-expect-error - accountType é opcional no schema, mas é necessário para criação
+      const transaction = await transactionsService.createTransaction(req.tenantDB, validatedData, req.user.id);
+      console.log('✅ Transaction created:', transaction.id);
+
+      try {
+        await database.createAuditLog({
+          userId: req.user.id,
+          tenantId: req.user.tenantId,
+          tableName: 'transactions',
+          recordId: transaction.id,
+          operation: 'create',
+          oldData: null,
+          newData: transaction,
+          ipAddress: (req.headers['x-forwarded-for'] as string) || (req.ip as any) || '',
+          userAgent: (req.headers['user-agent'] as string) || ''
+        });
+      } catch {}
+
+      res.status(201).json({
+        message: 'Transaction created successfully',
+        transaction,
+      });
+    } catch (error) {
+      console.error('❌ Create transaction error:', error);
+      res.status(400).json({
+        error: 'Failed to create transaction',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  async updateTransaction(req: TenantRequest, res: Response) {
+    try {
+      if (!req.user || !req.tenantDB) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      if (req.user.accountType === 'SIMPLES') {
+        return res.status(403).json({
+          error: 'Access denied',
+          message: 'Financial operations not available for this account type',
+        });
+      }
+
+      const { id } = req.params;
+      const validatedData = updateTransactionSchema.parse(req.body);
+      const oldTransaction = await transactionsService.getTransactionById(req.tenantDB, id);
+      const transaction = await transactionsService.updateTransaction(req.tenantDB, id, validatedData);
+
+      if (!transaction) {
+        return res.status(404).json({
+          error: 'Transaction not found',
+          message: 'The requested transaction does not exist or has been deleted'
+        });
+      }
+
+      try {
+        await database.createAuditLog({
+          userId: req.user.id,
+          tenantId: req.user.tenantId,
+          tableName: 'transactions',
+          recordId: transaction.id,
+          operation: 'update',
+          oldData: oldTransaction || null,
+          newData: transaction,
+          ipAddress: (req.headers['x-forwarded-for'] as string) || (req.ip as any) || '',
+          userAgent: (req.headers['user-agent'] as string) || ''
+        });
+      } catch {}
+
+      res.json({
+        message: 'Transaction updated successfully',
+        transaction,
+      });
+    } catch (error) {
+      console.error('Update transaction error:', error);
+      res.status(400).json({
+        error: 'Failed to update transaction',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  async deleteTransaction(req: TenantRequest, res: Response) {
+    try {
+      if (!req.user || !req.tenantDB) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      if (req.user.accountType === 'SIMPLES') {
+        return res.status(403).json({
+          error: 'Access denied',
+          message: 'Financial operations not available for this account type',
+        });
+      }
+
+      const { id } = req.params;
+      const oldTransaction = await transactionsService.getTransactionById(req.tenantDB, id);
+      const success = await transactionsService.deleteTransaction(req.tenantDB, id);
+
+      if (!success) {
+        return res.status(404).json({
+          error: 'Transaction not found',
+          message: 'The requested transaction does not exist or has already been deleted'
+        });
+      }
+
+      try {
+        await database.createAuditLog({
+          userId: req.user.id,
+          tenantId: req.user.tenantId,
+          tableName: 'transactions',
+          recordId: id,
+          operation: 'delete',
+          oldData: oldTransaction || null,
+          newData: { is_active: false },
+          ipAddress: (req.headers['x-forwarded-for'] as string) || (req.ip as any) || '',
+          userAgent: (req.headers['user-agent'] as string) || ''
+        });
+      } catch {}
+
+      res.json({
+        message: 'Transaction deleted successfully',
+      });
+    } catch (error) {
+      console.error('Delete transaction error:', error);
+      res.status(500).json({
+        error: 'Failed to delete transaction',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  async getStats(req: TenantRequest, res: Response) {
+    try {
+      if (!req.user || !req.tenantDB) return res.status(401).json({ error: 'Authentication required' });
+      if (req.user.accountType === 'SIMPLES') return res.status(403).json({ error: 'Access denied' });
+      const { dateFrom, dateTo } = req.query as any;
+      const stats = await transactionsService.getTransactionsStats(req.tenantDB, dateFrom, dateTo);
+      res.json({ stats });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to get stats', details: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  }
+
+  async getByCategory(req: TenantRequest, res: Response) {
+    try {
+      if (!req.user || !req.tenantDB) return res.status(401).json({ error: 'Authentication required' });
+      if (req.user.accountType === 'SIMPLES') return res.status(403).json({ error: 'Access denied' });
+      const { type, dateFrom, dateTo } = req.query as any;
+      const rows = await transactionsService.getTransactionsByCategory(req.tenantDB, type, dateFrom, dateTo);
+      res.json({ rows });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to get category report', details: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  }
+
+  async listRecurring(req: TenantRequest, res: Response) {
+    try {
+      if (!req.user || !req.tenantDB) return res.status(401).json({ error: 'Authentication required' });
+      if (req.user.accountType === 'SIMPLES') return res.status(403).json({ error: 'Access denied' });
+      const rows = await transactionsService.getRecurringTransactionsDue(req.tenantDB);
+      res.json({ rows });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch recurring', details: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  }
+
+  async runRecurring(req: TenantRequest, res: Response) {
+    try {
+      if (!req.user || !req.tenantDB) return res.status(401).json({ error: 'Authentication required' });
+      if (req.user.accountType === 'SIMPLES') return res.status(403).json({ error: 'Access denied' });
+      const rows = await transactionsService.getRecurringTransactionsDue(req.tenantDB);
+      const created: string[] = [];
+      const today = new Date();
+      for (const t of rows) {
+        const lastDate = new Date(t.date);
+        let nextDate = new Date(lastDate);
+        const freq = (t.recurring_frequency || 'monthly').toLowerCase();
+        if (freq === 'monthly') nextDate.setMonth(nextDate.getMonth() + 1);
+        else if (freq === 'quarterly') nextDate.setMonth(nextDate.getMonth() + 3);
+        else if (freq === 'yearly') nextDate.setFullYear(nextDate.getFullYear() + 1);
+
+        if (nextDate <= today) {
+          const payload: any = {
+            type: t.type,
+            amount: Number(t.amount),
+            categoryId: t.category_id,
+            category: t.category,
+            description: t.description,
+            date: nextDate.toISOString().slice(0, 10),
+            paymentMethod: t.payment_method as any,
+            status: 'confirmed',
+            projectId: t.project_id || undefined,
+            projectTitle: t.project_title || undefined,
+            clientId: t.client_id || undefined,
+            clientName: t.client_name || undefined,
+            tags: Array.isArray(t.tags) ? t.tags : [],
+            notes: t.notes || undefined,
+            isRecurring: true,
+            recurringFrequency: t.recurring_frequency as any,
+          };
+          const newT = await transactionsService.createTransaction(req.tenantDB, payload, req.user.id);
+          created.push(newT.id);
+        }
+      }
+      res.json({ createdCount: created.length, createdIds: created });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to run recurring', details: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  }
+}
+
+export const transactionsController = new TransactionsController();
