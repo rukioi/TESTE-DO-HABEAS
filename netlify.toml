@@ -30,3 +30,11 @@
   [[scheduled]]
   path = "/.netlify/functions/receivables-reminder"
   cron = "0 9 * * *"
+
+  [[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self' ..."
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
